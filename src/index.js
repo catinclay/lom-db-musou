@@ -3,6 +3,7 @@ import { RunMapScene } from './scenes/RunMapScene.js';
 import { BattleScene } from './scenes/BattleScene.js';
 import { ShopScene } from './scenes/ShopScene.js';
 import { SlotScene } from './scenes/SlotScene.js';
+import { EventScene } from './scenes/EventScene.js';
 import { GameOverScene } from './scenes/GameOverScene.js';
 
 // 執行期錯誤（Phaser 場景裡 throw 不會冒到 build，只會在 console）浮到畫面上，
@@ -28,7 +29,7 @@ const config = {
     width: 1600,
     height: 900,
   },
-  scene: [RunMapScene, BattleScene, ShopScene, SlotScene, GameOverScene],
+  scene: [RunMapScene, BattleScene, ShopScene, SlotScene, EventScene, GameOverScene],
 };
 
 new Phaser.Game(config);

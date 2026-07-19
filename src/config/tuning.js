@@ -191,7 +191,6 @@ export const TUNING = {
     eventsPerDay: 10,
     eliteInPoolChance: 0.25, // 白天池中「精英仇家」的比例
     startMoney: 30,
-    eventMoney: 8, // 佔位事件（Phase 1）給的銀兩
     speedrunTokensPerSkipped: 1,
     dally: { wavesPerEvent: 0.5, eliteChancePerEvent: 0.03 },
     battle: {
@@ -201,6 +200,19 @@ export const TUNING = {
       final: { waves: 6, rows: 4, eliteChance: 0.85 }, // 最終大魔王
     },
     reward: { battle: 6, elite: 12, boss: 25, final: 0 },
+
+    /** 奇遇（EventLibrary）的經濟/風險數值。內容（文案、選項）在 core/EventLibrary.js。 */
+    event: {
+      smallCoins: 6, // 保守選項的小銀兩
+      mushroomPoison: 8, // 野菇吃壞肚子扣血
+      gambleCost: 20, // 賭坊一把
+      bribe: 18, // 仇家買路錢
+      chestReward: 30, // 寶箱開中
+      chestTrap: 12, // 寶箱機關扣血
+      healPrice: 15,
+      healAmount: 25,
+      cardPrice: 18, // 郎中傳一招
+    },
 
     /**
      * 三輪連線拉霸（速通代幣消化，刻意弱於刷滿）。

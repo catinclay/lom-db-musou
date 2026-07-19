@@ -1,6 +1,8 @@
 import { defaultRng } from './rng.js';
 import { TUNING } from '../config/tuning.js';
 import { RELIC_IDS, getRelicDef } from './RelicLibrary.js';
+import { EVENT_IDS, getEventDef } from './EventLibrary.js';
+import { getCardDef, CARD_TYPE } from './CardLibrary.js';
 
 /**
  * 一局「江湖遠征」的權威狀態。零 Phaser —— 場景讀它、驅動它，戰鬥仍是同一個 BattleState。
@@ -72,7 +74,9 @@ export class RunState {
       else if (i % 3 === 2) kind = 'event';
       else if (this.rng() < this.tuning.run.eliteInPoolChance) kind = 'elite';
       else kind = 'battle';
-      pool.push({ id: `d${day}n${i}`, index: i, kind, done: false });
+      const node = { id: `d${day}n${i}`, index: i, kind, done: false };
+      if (kind === 'event') node.eventId = EVENT_IDS[Math.floor(this.rng() * EVENT_IDS.length)];
+      pool.push(node);
     }
     return pool;
   }
@@ -96,11 +100,8 @@ export class RunState {
     if (!node || node.done) return null;
 
     if (node.kind === 'event') {
-      node.done = true;
-      this.eventsDoneToday += 1;
-      const gained = this.tuning.run.eventMoney;
-      this.money += gained;
-      return { type: 'reward', money: gained };
+      // 交給 EventScene 演敘事＋選項；完成與否在 resolveEventChoice 才定
+      return { type: 'event', event: getEventDef(node.eventId), node };
     }
 
     if (node.kind === 'inn') {
@@ -113,6 +114,33 @@ export class RunState {
 
     this.pending = { node, kind: node.kind, isBoss: false };
     return { type: 'battle', kind: node.kind, config: this.battleConfig(node.kind, false) };
+  }
+
+  /**
+   * 玩家在奇遇中選了第 i 個選項。就地套用結果。
+   *   立即事件 → 標記節點完成、計入當天，回 { text }。
+   *   觸發戰鬥 → 設 pending（done/count 交給戰後 finishBattle），回 { text?, battle, ... }。
+   * @returns 結果物件（含 text，可能含 battle 配置）
+   */
+  resolveEventChoice(node, choiceIndex) {
+    const event = getEventDef(node.eventId);
+    const result = event.choices[choiceIndex].resolve(this, this.rng) ?? {};
+    if (result.battle) {
+      this.pending = { node, kind: result.battleKind ?? 'battle', isBoss: false };
+    } else {
+      node.done = true;
+      this.eventsDoneToday += 1;
+    }
+    return result;
+  }
+
+  /** 隨機挑牌組裡一張攻擊牌，附上 level 級的某狀態。@returns 那張牌的名字，或 null（沒攻擊牌） */
+  enchantRandomAttackCard(statusId, level, rng = this.rng) {
+    const idxs = this.deck.map((s, i) => i).filter((i) => getCardDef(this.deck[i].defId).type === CARD_TYPE.ATTACK);
+    if (!idxs.length) return null;
+    const i = idxs[Math.floor(rng() * idxs.length)];
+    this.enchantDeckCard(i, statusId, level);
+    return getCardDef(this.deck[i].defId).name;
   }
 
   /** 今天尾王的類別：最終日 → final；每 bossEveryDays 天 → boss（魔王）；其餘 → elite（小王）。 */

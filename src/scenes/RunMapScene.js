@@ -142,10 +142,10 @@ export class RunMapScene extends Phaser.Scene {
       this.scene.start('Shop', { run: this.run, shop: res.shop });
       return;
     }
-    // 立即事件：給獎、原地刷新
-    this.flash(`＋${res.money} 銀兩`, 0xd9b45c);
-    this.renderHud();
-    this.renderPool();
+    if (res.type === 'event') {
+      this.scene.start('Event', { run: this.run, node: res.node, event: res.event });
+      return;
+    }
   }
 
   goBoss() {

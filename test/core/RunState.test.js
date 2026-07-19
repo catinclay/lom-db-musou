@@ -32,15 +32,13 @@ describe('尾王節奏（殺戮尖塔式）', () => {
 });
 
 describe('白天事件池', () => {
-  it('event 型節點立即給銀兩、標記完成', () => {
+  it('event 型節點回傳奇遇（延後到選項才結算）', () => {
     const r = run();
     const ev = r.dayPool.find((n) => n.kind === 'event');
-    const before = r.money;
     const res = r.takeNode(ev.id);
-    expect(res.type).toBe('reward');
-    expect(r.money).toBe(before + r.tuning.run.eventMoney);
-    expect(ev.done).toBe(true);
-    expect(r.eventsDoneToday).toBe(1);
+    expect(res.type).toBe('event');
+    expect(res.event.id).toBe(ev.eventId);
+    expect(ev.done).toBe(false); // 還沒選，尚未完成
   });
 
   it('battle 型節點回傳戰鬥配置並設 pending', () => {
@@ -66,10 +64,48 @@ describe('白天事件池', () => {
 
   it('已完成或不存在的節點回 null', () => {
     const r = run();
-    const ev = r.dayPool.find((n) => n.kind === 'event');
-    r.takeNode(ev.id);
-    expect(r.takeNode(ev.id)).toBeNull();
+    const n = r.dayPool[0];
+    n.done = true;
+    expect(r.takeNode(n.id)).toBeNull();
     expect(r.takeNode('沒這節點')).toBeNull();
+  });
+});
+
+describe('奇遇（EventLibrary）', () => {
+  it('每個 event 節點都帶 eventId', () => {
+    const r = run();
+    for (const n of r.dayPool.filter((n) => n.kind === 'event')) expect(n.eventId).toBeTruthy();
+  });
+
+  it('立即事件：選項結算後標記完成、計入當天', () => {
+    const r = run();
+    const node = { id: 'ev-x', kind: 'event', eventId: 'baoXiang', done: false };
+    r.dayPool.push(node);
+    r.rng = () => 0.1; // 寶箱開中（rng < 0.7）
+    const res = r.resolveEventChoice(node, 0); // 撬開
+    expect(res.text).toBeTruthy();
+    expect(res.battle).toBeUndefined();
+    expect(node.done).toBe(true);
+    expect(r.eventsDoneToday).toBe(1);
+  });
+
+  it('戰鬥事件：設 pending、節點先不完成（交給戰後 finishBattle）', () => {
+    const r = run();
+    const node = { id: 'ev-y', kind: 'event', eventId: 'chouJia', done: false };
+    r.dayPool.push(node);
+    const res = r.resolveEventChoice(node, 0); // 拔刀相向 → 戰鬥
+    expect(res.battle).toBeTruthy();
+    expect(node.done).toBe(false);
+    expect(r.pending).not.toBeNull();
+    r.finishBattle({ playerHp: 30, outcome: 'won' });
+    expect(node.done).toBe(true); // 戰後才標記完成
+  });
+
+  it('enchantRandomAttackCard：附魔到牌組某攻擊牌', () => {
+    const r = run();
+    const name = r.enchantRandomAttackCard('poison', 1, () => 0);
+    expect(name).toBeTruthy();
+    expect(r.deck.some((s) => s.enchants?.poison)).toBe(true);
   });
 });
 

@@ -4,7 +4,7 @@
 > 每次改動若動到了架構或慣例，順手更新這裡。
 
 活俠傳同人遊戲 — Roguelike 牌組構築 ＋ 割草無雙。核心戰鬥（合成連鎖、境界連段、割草敵陣、
-附魔）已成形；**里程碑 3「江湖遠征」run 結構進行中（Phase 1–3 已上線：run loop、拉霸、客棧商店、遺物）** ——
+附魔）已成形；**里程碑 3「江湖遠征」run 結構進行中（Phase 1–3 已上線：run loop、拉霸、客棧商店、遺物、奇遇事件）** ——
 一天一池事件自由取捨、入夜打尾王，殺戮尖塔式節奏推進到最終魔王（見「§四·九 正式流程」）。
 
 ---
@@ -68,6 +68,7 @@
 | `core/RunState.js` | **一局江湖遠征的狀態機**（零 Phaser，run-meta 之上、BattleState 之下）：牌組跨戰保存、銀兩、主角血量、日程與事件池、尾王節奏（`dayBossKind`）、拖延加成（`battleConfig`）、速通拉霸代幣、`takeNode`/`callBoss`/`finishBattle`/`advanceDay`；牌組編輯 `addDeckCard`/`removeDeckCard`/`enchantDeckCard`（商店/拉霸/事件共用）。`STARTING_DECK` 在這。 | 改 run 流程、每日事件池、尾王節奏/縮放、戰後結算、起始牌組、牌組增刪附魔。 |
 | `core/slot.js` | **三輪連線拉霸**（零 Phaser）：`spinReels`/`resolveSlotReward`（三連大獎：金/葫→銀兩、劍→加攻擊牌、毒/火→牌組附魔、囧→槓龜；兩連/全不同→小銀兩）/`spinSlot`/`applySlotReward`。速通代幣消化，數值在 `tuning.run.slot`。 | 改拉霸符號權重、賠付、獎池、附魔目標。 |
 | `core/RelicLibrary.js` | **遺物·秘籍**定義（一局內被動加成）：`onAcquire(run)`（拿到即生效，如 +血量上限）、`battleMods`（每場疊 energy/handSize…）、`hooks`（`onBattleStart`/`onTurnStart`，收 battle 本體）。來源：魔王打贏＋客棧。持有存 `RunState.relics`（只存 id）。 | 新增/改遺物、加新的 hook 時機。 |
+| `core/EventLibrary.js` | **奇遇·江湖事件**定義（白天池 'event' 節點內容）：每個事件一段敘事 ＋ 選項，選項 `resolve(run, rng)` 就地改 run、回 `{ text }`（立即）或 `{ text, battle, battleKind }`（觸發戰鬥）。文案在這、數值在 `tuning.run.event`。首批：野菇/賭坊/仇家堵路/荒廟寶箱/雲遊郎中。 | 新增/改奇遇、選項、結果。 |
 | `core/BattleState.js` | **戰鬥狀態機**：回合、能量、主角血量、`start`/`startTurn`/`endTurn`、`enemyPhase`、`playCard`、debug 操作。也是 MergeEngine 的 ctx。**有限戰鬥**：`battle` 配置（hp/maxHp/waves/rows/eliteChance…，由 RunState 注入）、`wavesLeft`、`checkOutcome` 發 `BATTLE_WON`/`BATTLE_LOST`；省略配置＝無限補充波（舊沙盒）。**割草手感**：`maybeRushNextWave` —— 出牌清空整片且還有補充波時，下一波當下湧上（不必等回合結束）。 | 改回合流程、出牌結算、抽牌時機、能量、主角血量、敵人相位、勝負判定、清場補波。 |
 | `core/EnemyLibrary.js` | 敵人**定義**（hp、攻擊力、顏色）。 | 新增敵種、改敵人數值。 |
 | `core/Formation.js` | **敵陣**：`lanes`×`maxRank` 格狀，敵人各佔一格 (rank,lane)。`advance`（前進補位：卡住會**側移**到隔壁路）、`refill`、`knockback`（擊退連鎖推擠＋塞滿時側擠）、`prepareFront`（攻擊準備）、縱列/近排查詢（`laneEnemies`/`nearestRanks`/`pickBlast`）。敵人帶 `prepared`（telegraph）與 `statuses`。 | 改敵人移動/補位、擊退、備戰、鎖定查詢。 |
@@ -107,6 +108,7 @@
 | `scenes/BattleScene.js` | **單場戰鬥總指揮**：由 `scene.start('Battle',{run,config})` 進來，用 `run.deck`＋config 建 BattleState；接事件、協調演出、**抽牌批次化**、勝負判定後 `run.finishBattle` 並轉場（尾王贏且有代幣 → 先進 Slot）。 | 改戰鬥場景接線、抽牌批次、勝負轉場、背景與提示文字。 |
 | `scenes/ShopScene.js` | **客棧**：白天池 'inn' 節點進來，買招式（3 貨架）／歇息回血／刪去一招（點牌組選單）／拉霸。交易全走 `RunState`（`buyShopCard`/`restAtInn`/`buyRemoveCard`）。 | 改客棧版面、貨架、服務按鈕、刪牌選單。 |
 | `scenes/SlotScene.js` | **拉霸機**：花速通代幣拉三輪，演轉輪→`applySlotReward`。入夜打贏尾王（有代幣）自動進來、客棧也可進（帶 `back` 回客棧），離開回 RunMap。邏輯全在 `core/slot.js`。 | 改轉輪演出、按鈕、賠率小抄。 |
+| `scenes/EventScene.js` | **奇遇**：白天池 'event' 節點進來，演敘事＋選項按鈕（`RunState.resolveEventChoice`）。立即結果 → 顯示文字＋繼續回 RunMap；觸發戰鬥 → 進 Battle。內容在 `core/EventLibrary.js`。 | 改奇遇版面、選項/結果呈現。 |
 | `scenes/GameOverScene.js` | 一局結束（通關/敗北）的**據點佔位**：顯示戰績、一鍵再闖（`new RunState`）。 | 改結束畫面；之後長成真正的據點/門派經營。 |
 | `config/tuning.js` | 所有數值：能量、起手張數、補抽機率、境界上限、連段倍率、動畫節奏、扇形佈局、抽牌窗口、**`run`（日程/尾王節奏/拖延加成/各類戰鬥波數與獎勵）**。 | **任何平衡/手感數字。禁止把數字散落到別處。** |
 | `index.js` | 進入點：註冊 `[RunMapScene, BattleScene, GameOverScene]`，開機進 RunMap。 | 改畫布、註冊新場景、開機場景。 |
@@ -296,7 +298,8 @@
 ```
 
 - **一天 = 一池事件**（`run.dayPool`，`tuning.run.eventsPerDay` 個）：玩家自由挑做。
-  `event` 型立即給銀兩；`battle`/`elite` 型開一場戰鬥；`inn` 型進客棧（買招/歇息/刪牌/拉霸）。
+  `event` 型是**有分支選項的奇遇**（`EventScene`＋`EventLibrary`，選項可能加錢/附魔/回血/加牌/賭一把/開打）；
+  `battle`/`elite` 型開一場戰鬥；`inn` 型進客棧（買招/歇息/刪牌/拉霸/買遺物）。
   每種都算一次「當天事件」（計入拖延）。做越多越強，但……
 - **入夜召尾王**（`callBoss`）：尾王類別由 `dayBossKind` 決定 —— 平日 `elite`（小王）、
   每 `bossEveryDays` 天 `boss`（魔王）、第 `finalDay` 天 `final`（最終大魔王）。
@@ -312,8 +315,8 @@
   `battleConfig.relics` 帶進 `BattleState`，套 `battleMods`（energy/handSize）與 `hooks`（onBattleStart/onTurnStart）。
 - **失敗＝硬核**：血量歸零 → run 結束回 GameOver（據點佔位）。跨戰保存的是**牌組/血量/銀兩/遺物**（`RunState`），
   局內境界合成照舊每場重置（見「§五」不變量）。
-- **後續階段**：Phase 1–3 已上線（run loop、拉霸、客棧商店、遺物）。剩 **EventLibrary**（有分支選項的奇遇＋賭坊）、
-  Phase 4 主角屬性·境界上限、Phase 5 據點·門派跨 run 經營。數值都在 `tuning.run`。
+- **後續階段**：Phase 1–3 已上線（run loop、拉霸、客棧商店、遺物、奇遇事件）—— **Phase 2/3 內容大致完備**。
+  剩 Phase 4 主角屬性·境界上限、Phase 5 據點·門派跨 run 經營。數值都在 `tuning.run`。
 
 ## 五、關鍵不變量與慣例（改動時別踩）
 
