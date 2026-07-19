@@ -40,7 +40,7 @@ export const STARTING_DECK = [
 ];
 
 export class RunState {
-  constructor({ rng = defaultRng, tuning = TUNING, deck } = {}) {
+  constructor({ rng = defaultRng, tuning = TUNING, deck, meta } = {}) {
     this.rng = rng;
     this.tuning = tuning;
     // 牌組是實體資料，複製一份 spec，避免共用參照被外部改動。
@@ -60,6 +60,8 @@ export class RunState {
     this.day = 0;
     /** 場景開戰前設好，戰後 finishBattle 用它結算。 */
     this.pending = null;
+    // 跨 run 的據點升級：把永久加成疊進這局的起始狀態（血/內力/銀兩/牌組/遺物）。
+    if (meta) meta.applyToRun(this);
     this.beginDay();
   }
 

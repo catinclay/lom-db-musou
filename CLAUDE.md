@@ -4,8 +4,8 @@
 > 每次改動若動到了架構或慣例，順手更新這裡。
 
 活俠傳同人遊戲 — Roguelike 牌組構築 ＋ 割草無雙。核心戰鬥（合成連鎖、境界連段、割草敵陣、
-附魔）已成形；**里程碑 3「江湖遠征」run 結構進行中（Phase 1–4 已上線：run loop、拉霸、客棧商店、遺物、奇遇、主角屬性）** ——
-一天一池事件自由取捨、入夜打尾王，殺戮尖塔式節奏推進到最終魔王（見「§四·九 正式流程」）。
+附魔）已成形；**里程碑 3「江湖遠征」run 結構 Phase 1–5 全上線**（run loop、拉霸、客棧、遺物、奇遇、主角屬性、跨 run 據點 meta）——
+一天一池事件自由取捨、入夜打尾王，殺戮尖塔式節奏推進到最終魔王；一局結束回門派據點花威望做永久升級（見「§四·九 正式流程」）。
 
 ---
 
@@ -48,7 +48,7 @@
 |------|--------|
 | `src/core/` | 遊戲邏輯：卡牌、合成、連段、牌庫、**敵人/割草戰鬥**、戰鬥狀態機。純 JS，零 Phaser。 |
 | `src/ui/` | 視覺與互動：手牌佈局、卡牌 sprite、動畫、拖曳箭頭、**肩後視角敵陣**、debug 面板。 |
-| `src/scenes/` | Phaser 場景：`RunMapScene`（白天樞紐）⇄ `BattleScene`（單場戰鬥）⇄ `GameOverScene`（據點佔位）。 |
+| `src/scenes/` | Phaser 場景：`BaseScene`（門派據點·開機/局間樞紐）→ `RunMapScene`（白天樞紐）⇄ `BattleScene`（單場戰鬥）⇄ `ShopScene`/`SlotScene`/`EventScene`。 |
 | `src/config/` | `tuning.js` — 所有數值。**調手感只該動這裡。** |
 | `test/` | vitest 單元測試，鏡像 `src/` 結構（`test/core/`、`test/ui/`）。 |
 
@@ -68,7 +68,8 @@
 | `core/RunState.js` | **一局江湖遠征的狀態機**（零 Phaser，run-meta 之上、BattleState 之下）：牌組跨戰保存、銀兩、主角血量、**主角屬性 `attrs`**（maxRealm/energyPerTurn/startingHandSize，可成長）、日程與事件池、尾王節奏（`dayBossKind`）、拖延加成（`battleConfig`）、速通拉霸代幣、遺物、`takeNode`/`callBoss`/`finishBattle`/`resolveEventChoice`；牌組編輯 `addDeckCard`/`removeDeckCard`/`enchantDeckCard`。`STARTING_DECK` 在這。 | 改 run 流程、每日事件池、尾王節奏/縮放、戰後結算、起始牌組、主角屬性、牌組增刪附魔。 |
 | `core/slot.js` | **三輪連線拉霸**（零 Phaser）：`spinReels`/`resolveSlotReward`（三連大獎：金/葫→銀兩、劍→加攻擊牌、毒/火→牌組附魔、囧→槓龜；兩連/全不同→小銀兩）/`spinSlot`/`applySlotReward`。速通代幣消化，數值在 `tuning.run.slot`。 | 改拉霸符號權重、賠付、獎池、附魔目標。 |
 | `core/RelicLibrary.js` | **遺物·秘籍**定義（一局內被動加成）：`onAcquire(run)`（拿到即生效，如 +血量上限）、`battleMods`（每場疊 energy/handSize…）、`hooks`（`onBattleStart`/`onTurnStart`，收 battle 本體）。來源：魔王打贏＋客棧。持有存 `RunState.relics`（只存 id）。 | 新增/改遺物、加新的 hook 時機。 |
-| `core/EventLibrary.js` | **奇遇·江湖事件**定義（白天池 'event' 節點內容）：每個事件一段敘事 ＋ 選項，選項 `resolve(run, rng)` 就地改 run、回 `{ text }`（立即）或 `{ text, battle, battleKind }`（觸發戰鬥）。文案在這、數值在 `tuning.run.event`。首批：野菇/賭坊/仇家堵路/荒廟寶箱/雲遊郎中。 | 新增/改奇遇、選項、結果。 |
+| `core/EventLibrary.js` | **奇遇·江湖事件**定義（白天池 'event' 節點內容）：每個事件一段敘事 ＋ 選項，選項 `resolve(run, rng)` 就地改 run、回 `{ text }`（立即）或 `{ text, battle, battleKind }`（觸發戰鬥）。文案在這、數值在 `tuning.run.event`。首批：野菇/賭坊/仇家堵路/荒廟寶箱/雲遊郎中/高人指點。 | 新增/改奇遇、選項、結果。 |
+| `core/MetaState.js` | **跨 run 門派據點**（Phase 5，rogue-lite meta）：威望（prestige）＋永久升級表（`META_UPGRADES`：底子/內力/家底/絕學/傳家寶）、`earnFromRun`/`buyUpgrade`/`applyToRun`/`toJSON`。純資料零瀏覽器；持久化在 `ui/metaStore.js`。`RunState({ meta })` 建構時 `applyToRun` 疊起始加成。 | 新增/改據點升級、威望公式（`tuning.run.meta`）。 |
 | `core/BattleState.js` | **戰鬥狀態機**：回合、能量、主角血量、`start`/`startTurn`/`endTurn`、`enemyPhase`、`playCard`、debug 操作。也是 MergeEngine 的 ctx。**有限戰鬥**：`battle` 配置（hp/maxHp/waves/rows/eliteChance…，由 RunState 注入）、`wavesLeft`、`checkOutcome` 發 `BATTLE_WON`/`BATTLE_LOST`；省略配置＝無限補充波（舊沙盒）。**割草手感**：`maybeRushNextWave` —— 出牌清空整片且還有補充波時，下一波當下湧上（不必等回合結束）。 | 改回合流程、出牌結算、抽牌時機、能量、主角血量、敵人相位、勝負判定、清場補波。 |
 | `core/EnemyLibrary.js` | 敵人**定義**（hp、攻擊力、顏色）。 | 新增敵種、改敵人數值。 |
 | `core/Formation.js` | **敵陣**：`lanes`×`maxRank` 格狀，敵人各佔一格 (rank,lane)。`advance`（前進補位：卡住會**側移**到隔壁路）、`refill`、`knockback`（擊退連鎖推擠＋塞滿時側擠）、`prepareFront`（攻擊準備）、縱列/近排查詢（`laneEnemies`/`nearestRanks`/`pickBlast`）。敵人帶 `prepared`（telegraph）與 `statuses`。 | 改敵人移動/補位、擊退、備戰、鎖定查詢。 |
@@ -93,6 +94,7 @@
 | `ui/tweens.js` | tween 的 Promise 封裝：`tweenTo`、`stopTweensOf`。**見下方「陷阱」。** | 幾乎不用動；新增動畫時用它，別自己刻 `new Promise`。 |
 | `ui/DragController.js` | 拖曳與箭頭：唯一手勢是「從牌拉箭頭」，**落點決定行為**（越過戰場線＝出牌、落在別張牌＝忘形合成）。 | 改拖曳手勢、箭頭外觀、出牌 vs 合成的判定。 |
 | `ui/DebugPanel.js` | 原生 DOM 疊在 canvas 上的沙盒工具（塞牌、抽牌、結束回合、重開、速度、即時數據）。 | 改 debug 工具的按鈕/顯示。 |
+| `ui/metaStore.js` | 據點狀態的 **localStorage 持久化**（`loadMeta`/`saveMeta`）—— 只有渲染層碰瀏覽器；`core/MetaState` 保持純資料。讀不到/壞掉回全新 MetaState。 | 改存檔 key、序列化。 |
 | `ui/DeckOverlay.js` | **檢視本局牌組的模態浮層**（高 depth 同場景物件，非切場景，戰鬥中也能開）。用 CardSprite 縮小排格。`mode:'view'`（只看）或 `'select'`（點一張→高亮→按確定才生效，避免誤觸即刪，`onConfirm(index)` 回呼）。 | 改牌組檢視/選牌介面、確認流程。 |
 | `ui/FormationView.js` | **敵陣的視覺層**：把 Formation 投影成肩後視角的一群 sprite。`sync`（前進時全量對齊）、`flashAndPop`（攻擊命中的閃光/傷害數字/倒地）。 | 改敵人怎麼演出被打、前進、死亡。 |
 | `ui/EnemySprite.js` | 單個敵人的視覺：剪影（腳底 origin）＋ 頭上血條。 | 改敵人長相、血條。 |
@@ -109,9 +111,9 @@
 | `scenes/ShopScene.js` | **客棧**：白天池 'inn' 節點進來，買招式（3 貨架）／歇息回血／刪去一招（點牌組選單）／拉霸。交易全走 `RunState`（`buyShopCard`/`restAtInn`/`buyRemoveCard`）。 | 改客棧版面、貨架、服務按鈕、刪牌選單。 |
 | `scenes/SlotScene.js` | **拉霸機**：花速通代幣拉三輪，演轉輪→`applySlotReward`。入夜打贏尾王（有代幣）自動進來、客棧也可進（帶 `back` 回客棧），離開回 RunMap。邏輯全在 `core/slot.js`。 | 改轉輪演出、按鈕、賠率小抄。 |
 | `scenes/EventScene.js` | **奇遇**：白天池 'event' 節點進來，演敘事＋選項按鈕（`RunState.resolveEventChoice`）。立即結果 → 顯示文字＋繼續回 RunMap；觸發戰鬥 → 進 Battle。內容在 `core/EventLibrary.js`。 | 改奇遇版面、選項/結果呈現。 |
-| `scenes/GameOverScene.js` | 一局結束（通關/敗北）的**據點佔位**：顯示戰績、一鍵再闖（`new RunState`）。 | 改結束畫面；之後長成真正的據點/門派經營。 |
+| `scenes/BaseScene.js` | **門派據點**（開機場景＋一局結束的落點，Phase 5）：帶完局的 run 進來 → `meta.earnFromRun` 賺威望、存檔；花威望買永久升級（`MetaState`）；「闖江湖」→ `new RunState({ meta })` → RunMap。存檔在 `ui/metaStore.js`。 | 改據點版面、升級商店、開局按鈕。 |
 | `config/tuning.js` | 所有數值：能量、起手張數、補抽機率、境界上限、連段倍率、動畫節奏、扇形佈局、抽牌窗口、**`run`（日程/尾王節奏/拖延加成/各類戰鬥波數與獎勵）**。 | **任何平衡/手感數字。禁止把數字散落到別處。** |
-| `index.js` | 進入點：註冊 `[RunMapScene, BattleScene, GameOverScene]`，開機進 RunMap。 | 改畫布、註冊新場景、開機場景。 |
+| `index.js` | 進入點：註冊 `[BaseScene, RunMapScene, BattleScene, ShopScene, SlotScene, EventScene]`，**開機進 Base（門派據點）**。 | 改畫布、註冊新場景、開機場景。 |
 | `index.js` | Phaser 遊戲進入點（畫布尺寸、縮放、掛載場景）。 | 改畫布大小、註冊新場景。 |
 
 ---
@@ -145,6 +147,7 @@
 | 新增/改遺物·秘籍 | `core/RelicLibrary.js`（`battleMods`/`hooks`/`onAcquire`）；戰鬥掛鉤在 `core/BattleState.js`（`runRelicHook`/`relicMod`） |
 | 改主角屬性·成長（境界上限/內力/起手/血量） | `core/RunState.js`（`attrs`，初值在 `config/tuning.js`）；覆蓋點 `core/BattleState.js` 建構子；成長來源 `RelicLibrary`（無形劍意）＋`EventLibrary`（高人指點） |
 | 新增/改奇遇 | `core/EventLibrary.js`（事件＋選項＋`resolve`），數值在 `config/tuning.js`（`run.event`） |
+| 改據點升級·威望（跨 run） | `core/MetaState.js`（`META_UPGRADES`）＋ `config/tuning.js`（`run.meta`）；UI 在 `scenes/BaseScene.js`、存檔 `ui/metaStore.js` |
 | 改戰鬥的勝負條件、敵潮規模/波數 | `core/BattleState.js`（`checkOutcome`/`wavesLeft`）＋ `core/RunState.js`（`battleConfig`）＋ `config/tuning.js`（`run.battle`） |
 | 改白天地圖版面、節點、入夜按鈕 | `scenes/RunMapScene.js` |
 | 改傷害數字/連段的飄字演出 | `ui/Dummy.js` |
@@ -282,11 +285,14 @@
 
 ---
 
-## 四·九、正式流程 / 一局江湖遠征（里程碑 3，Phase 1 已上線）
+## 四·九、正式流程 / 一局江湖遠征（里程碑 3，Phase 1–5 已上線）
 
-在戰鬥之上加一層 `RunState`，戰鬥仍是同一個 `BattleState`。分層：
+在戰鬥之上加一層 `RunState`，戰鬥仍是同一個 `BattleState`；再上面一層是跨 run 的 `MetaState`（門派據點）。分層：
 
 ```
+   BaseScene（門派據點）── 花威望買永久升級（MetaState）
+        │ 闖江湖 → new RunState({ meta }) —— meta.applyToRun 疊起始加成
+        ▼
    RunMapScene（白天樞紐）
         │ takeNode / callBoss → { config }
         ▼
@@ -296,7 +302,7 @@
    run.finishBattle(battle) → 血量寫回、給獎、推進日程 or 結束
         │
         ├─ 續跑 → 回 RunMapScene（下一節點 / 隔天）
-        └─ runOver → GameOverScene（通關 / 敗北）
+        └─ runOver → BaseScene（earnFromRun 賺威望、存檔）
 ```
 
 - **一天 = 一池事件**（`run.dayPool`，`tuning.run.eventsPerDay` 個）：玩家自由挑做。
@@ -318,10 +324,12 @@
 - **主角屬性·境界上限**（`RunState.attrs`，Phase 4）：`maxRealm`/`energyPerTurn`/`startingHandSize` 初始自 tuning、跨戰保存、可成長。
   `battleConfig.attrs` 帶進 `BattleState`，**覆蓋 `this.tuning` 的對應值**（連合成上限 `maxRealm` 一起流進 merge）。
   成長來源：遺物**無形劍意**（境界上限 +1）、奇遇**高人指點**（花銀兩練內力/起手/境界上限）；血量上限走 `RunState.maxHp`（金鐘罩）。
-- **失敗＝硬核**：血量歸零 → run 結束回 GameOver（據點佔位）。跨戰保存的是**牌組/血量/銀兩/遺物**（`RunState`），
+- **失敗＝硬核**：血量歸零 → run 結束回 `BaseScene`（門派據點）。跨戰保存的是**牌組/血量/銀兩/遺物/屬性**（`RunState`），
   局內境界合成照舊每場重置（見「§五」不變量）。
-- **後續階段**：Phase 1–4 已上線（run loop、拉霸、客棧商店、遺物、奇遇、主角屬性）。
-  剩 **Phase 5 據點·門派跨 run 經營**（run 結束帶回的永久解鎖）。數值都在 `tuning.run` / `tuning`（屬性初值）。
+- **跨 run 據點·門派**（`MetaState`，Phase 5）：run 結束依撐到第幾天 ＋ 通關獎勵賺**威望**，在 `BaseScene` 花在
+  永久升級（更多起始血/內力/銀兩、牌組多牌、起手帶遺物）。存 localStorage（`ui/metaStore.js`）；`new RunState({ meta })` 疊起始加成。
+- **進度**：里程碑 3 的 **Phase 1–5 全上線**（run loop、拉霸、客棧、遺物、奇遇、主角屬性、據點 meta）。
+  接下來是**內容擴充與平衡**（更多卡/敵/遺物/奇遇/升級），非新架構。數值都在 `tuning`。
 
 ## 五、關鍵不變量與慣例（改動時別踩）
 

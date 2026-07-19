@@ -22,7 +22,7 @@ const HAND_BASE_Y = 790;
 /**
  * 一場戰鬥的場景（割草）。牌組、血量、敵潮規模全由 RunState 注入的配置決定：
  *   scene.start('Battle', { run, config })
- * 打贏 → 回 RunMap 推進日程；打輸（血量歸零）→ GameOver。
+ * 打贏 → 回 RunMap 推進日程；打輸（血量歸零）/ 通關 → 回 Base（門派據點）。
  *
  * 戰鬥內部的接線（core↔UI、合成劇本、敵陣演出）沿用原沙盒，不動。
  */
@@ -403,7 +403,7 @@ export class BattleScene extends Phaser.Scene {
 
     this.time.delayedCall(Math.max(1, (res.relic ? 1500 : 800) / this.handView.speed), () => {
       if (res.runOver) {
-        this.scene.start('GameOver', { run: this.run, result: res.outcome, cleared: res.cleared });
+        this.scene.start('Base', { run: this.run });
       } else if (res.dayAdvanced && this.run.slotTokens > 0) {
         // 入夜打贏尾王、手上有速通代幣 ⇒ 先去拉霸機，拉完再進隔天
         this.scene.start('Slot', { run: this.run });

@@ -201,6 +201,9 @@ export const TUNING = {
     },
     reward: { battle: 6, elite: 12, boss: 25, final: 0 },
 
+    /** 跨 run 的「門派威望」（Phase 5）：run 結束依撐到第幾天 ＋ 通關獎勵賺取，回據點花在永久升級。 */
+    meta: { prestigePerDay: 3, winBonus: 25 },
+
     /** 奇遇（EventLibrary）的經濟/風險數值。內容（文案、選項）在 core/EventLibrary.js。 */
     event: {
       smallCoins: 6, // 保守選項的小銀兩
