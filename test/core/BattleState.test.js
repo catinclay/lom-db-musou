@@ -438,3 +438,26 @@ describe('遺物·秘籍（BattleState 掛鉤）', () => {
     expect(near.every((e) => e.statuses.burn === 3)).toBe(true);
   });
 });
+
+describe('主角屬性（attrs 覆蓋 tuning）', () => {
+  it('內力上限：影響每回合內力', () => {
+    const b = new BattleState({ deckList: deckOf(['hengPi']), rng: seededRng(1), tuning: TUNING, battle: { attrs: { energyPerTurn: 6 } } });
+    b.start();
+    expect(b.energy).toBe(6);
+  });
+
+  it('起手張數：影響開手張數', () => {
+    const deck = ['pi', 'ci', 'dang', 'buFa', 'saoTang', 'anqi', 'guan']; // 7 張不同名，不會合成
+    const b = new BattleState({ deckList: deckOf(deck), rng: seededRng(1), tuning: TUNING, battle: { attrs: { startingHandSize: 7 } } });
+    b.start();
+    expect(b.hand.size).toBe(7);
+  });
+
+  it('境界上限：流進合成上限（maxRealm 2 → 併到境界二就停）', () => {
+    const noDraw = { ...TUNING, mergeDraw: { baseChance: 0, decayPerMerge: 0, minChance: 0 } };
+    const b = new BattleState({ deckList: deckOf(['pi', 'pi', 'pi', 'pi']), rng: seededRng(42), tuning: noDraw, battle: { attrs: { maxRealm: 2 } } });
+    b.start();
+    expect(b.hand.size).toBe(2); // 四張境界一 → 兩張境界二（到頂不再併）
+    expect(b.hand.toArray().every((c) => c.realm === 2)).toBe(true);
+  });
+});

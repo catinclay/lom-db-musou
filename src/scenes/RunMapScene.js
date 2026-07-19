@@ -40,8 +40,11 @@ export class RunMapScene extends Phaser.Scene {
     this.hint = this.add
       .text(800, 150, '', { fontFamily: 'sans-serif', fontSize: '15px', color: '#9c8a70' })
       .setOrigin(0.5);
+    this.attrText = this.add
+      .text(800, 184, '', { fontFamily: 'sans-serif', fontSize: '16px', color: '#9fd0e8' })
+      .setOrigin(0.5);
     this.relicText = this.add
-      .text(800, 186, '', { fontFamily: 'sans-serif', fontSize: '16px', color: '#c9a8e0' })
+      .text(800, 216, '', { fontFamily: 'sans-serif', fontSize: '16px', color: '#c9a8e0' })
       .setOrigin(0.5);
 
     // 入夜決戰按鈕
@@ -69,6 +72,9 @@ export class RunMapScene extends Phaser.Scene {
     );
     const bk = r.dayBossKind();
     this.bossTxt?.setText(`入夜決戰 — ${BOSS_LABEL[bk] ?? bk}`);
+
+    const a = r.attrs;
+    this.attrText.setText(`境界上限 ${a.maxRealm}　內力 ${a.energyPerTurn}　起手 ${a.startingHandSize}`);
 
     const relics = r.relics.map((id) => getRelicDef(id).name);
     this.relicText.setText(relics.length ? `遺物：${relics.join('　')}` : '遺物：（無）');

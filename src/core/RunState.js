@@ -47,6 +47,12 @@ export class RunState {
     this.deck = (deck ?? STARTING_DECK).map((s) => ({ ...s }));
     this.maxHp = tuning.combat.playerMaxHp;
     this.hp = this.maxHp;
+    // 主角屬性（跨戰保存、可成長）：戰鬥時覆蓋 tuning 的對應值（見 battleConfig / BattleState）。
+    this.attrs = {
+      maxRealm: tuning.maxRealm,
+      energyPerTurn: tuning.energyPerTurn,
+      startingHandSize: tuning.startingHandSize,
+    };
     this.money = tuning.run.startMoney;
     this.slotTokens = 0; // 速通拉霸代幣（Phase 2 拉霸表消化）
     this.relics = [];
@@ -177,7 +183,15 @@ export class RunState {
       waves += Math.floor(d * r.dally.wavesPerEvent);
       eliteChance = Math.min(1, eliteChance + d * r.dally.eliteChancePerEvent);
     }
-    return { hp: this.hp, maxHp: this.maxHp, waves, rows: base.rows, eliteChance, relics: [...this.relics] };
+    return {
+      hp: this.hp,
+      maxHp: this.maxHp,
+      waves,
+      rows: base.rows,
+      eliteChance,
+      relics: [...this.relics],
+      attrs: { ...this.attrs },
+    };
   }
 
   /**

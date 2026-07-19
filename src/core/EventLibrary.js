@@ -146,6 +146,45 @@ export const EVENT_DEFS = {
       { label: '婉拒', resolve: () => ({ text: '你拱手道別，繼續趕路。' }) },
     ],
   },
+
+  gaoRen: {
+    id: 'gaoRen',
+    name: '高人指點',
+    text: '崖邊一位白鬚高人閉目打坐，忽然睜眼：「小子，想練點什麼？」',
+    choices: [
+      {
+        label: (run) => `練內力（${run.tuning.run.event.trainCost} 銀兩，內力上限 +1）`,
+        resolve: (run) => {
+          const c = run.tuning.run.event.trainCost;
+          if (run.money < c) return { text: '高人搖頭：「連束脩都沒有，練什麼功。」' };
+          run.money -= c;
+          run.attrs.energyPerTurn += 1;
+          return { text: '高人拍你天靈，內力上限 +1。' };
+        },
+      },
+      {
+        label: (run) => `練身法（${run.tuning.run.event.trainCost} 銀兩，每回合起手 +1 張）`,
+        resolve: (run) => {
+          const c = run.tuning.run.event.trainCost;
+          if (run.money < c) return { text: '高人搖頭：「沒錢免談。」' };
+          run.money -= c;
+          run.attrs.startingHandSize += 1;
+          return { text: '一番指點，你身法更快，起手 +1 張。' };
+        },
+      },
+      {
+        label: (run) => `悟境界（${run.tuning.run.event.realmCost} 銀兩，境界上限 +1）`,
+        resolve: (run) => {
+          const c = run.tuning.run.event.realmCost;
+          if (run.money < c) return { text: '高人嘆道：「悟境界的機緣，可不便宜。」' };
+          run.money -= c;
+          run.attrs.maxRealm += 1;
+          return { text: '你福至心靈，境界上限 +1。' };
+        },
+      },
+      { label: '婉拒', resolve: () => ({ text: '你搖頭：「晚輩緣分未到。」拱手離去。' }) },
+    ],
+  },
 };
 
 export const EVENT_IDS = Object.keys(EVENT_DEFS);

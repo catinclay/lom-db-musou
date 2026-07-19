@@ -109,6 +109,40 @@ describe('奇遇（EventLibrary）', () => {
   });
 });
 
+describe('主角屬性·成長', () => {
+  it('attrs 初始化自 tuning', () => {
+    const r = run();
+    expect(r.attrs.maxRealm).toBe(r.tuning.maxRealm);
+    expect(r.attrs.energyPerTurn).toBe(r.tuning.energyPerTurn);
+    expect(r.attrs.startingHandSize).toBe(r.tuning.startingHandSize);
+  });
+
+  it('battleConfig 帶上 attrs', () => {
+    const r = run();
+    r.attrs.maxRealm = 6;
+    expect(r.battleConfig('battle', false).attrs.maxRealm).toBe(6);
+  });
+
+  it('無形劍意：境界上限 +1', () => {
+    const r = run();
+    const before = r.attrs.maxRealm;
+    r.addRelic('wuXing');
+    expect(r.attrs.maxRealm).toBe(before + 1);
+  });
+
+  it('高人指點：花銀兩練屬性', () => {
+    const r = run();
+    r.money = 100;
+    const node = { id: 'g', kind: 'event', eventId: 'gaoRen', done: false };
+    const e0 = r.attrs.energyPerTurn;
+    const res = r.resolveEventChoice(node, 0); // 練內力
+    expect(res.text).toBeTruthy();
+    expect(r.attrs.energyPerTurn).toBe(e0 + 1);
+    expect(r.money).toBe(100 - r.tuning.run.event.trainCost);
+    expect(node.done).toBe(true);
+  });
+});
+
 describe('尾王吃「拖延加成」（多農越硬）', () => {
   it('白天做越多事件，尾王補充波與精英率越高', () => {
     const r = run();

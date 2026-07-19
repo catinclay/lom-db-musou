@@ -33,6 +33,14 @@ export const RELIC_DEFS = {
       run.hp = Math.min(run.maxHp, run.hp + 25);
     },
   },
+  wuXing: {
+    id: 'wuXing',
+    name: '無形劍意',
+    desc: '境界上限 +1（能把牌養得更高）',
+    onAcquire: (run) => {
+      run.attrs.maxRealm += 1;
+    },
+  },
   cuiDu: {
     id: 'cuiDu',
     name: '淬毒袖箭',

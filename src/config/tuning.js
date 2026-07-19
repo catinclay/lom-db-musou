@@ -212,6 +212,8 @@ export const TUNING = {
       healPrice: 15,
       healAmount: 25,
       cardPrice: 18, // 郎中傳一招
+      trainCost: 30, // 高人指點：練內力/起手張數
+      realmCost: 55, // 高人指點：悟境界上限（較貴）
     },
 
     /**

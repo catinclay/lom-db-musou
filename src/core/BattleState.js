@@ -34,7 +34,9 @@ export class BattleState {
   constructor({ deckList, rng = defaultRng, tuning = TUNING, bus = new EventBus(), battle = {} } = {}) {
     this.deckList = deckList ?? [];
     this.rng = rng;
-    this.tuning = tuning;
+    // 主角屬性覆蓋 tuning 的 maxRealm/energyPerTurn/startingHandSize（其餘 nested 值照舊共用）——
+    // 這樣屬性成長會流進回合資源與**合成上限**（merge 吃 this.tuning）。
+    this.tuning = battle.attrs ? { ...tuning, ...battle.attrs } : tuning;
     this.bus = bus;
     this.battleConfig = battle;
     /** 補抽機率的遞減依據，每回合歸零 */

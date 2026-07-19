@@ -4,7 +4,7 @@
 > 每次改動若動到了架構或慣例，順手更新這裡。
 
 活俠傳同人遊戲 — Roguelike 牌組構築 ＋ 割草無雙。核心戰鬥（合成連鎖、境界連段、割草敵陣、
-附魔）已成形；**里程碑 3「江湖遠征」run 結構進行中（Phase 1–3 已上線：run loop、拉霸、客棧商店、遺物、奇遇事件）** ——
+附魔）已成形；**里程碑 3「江湖遠征」run 結構進行中（Phase 1–4 已上線：run loop、拉霸、客棧商店、遺物、奇遇、主角屬性）** ——
 一天一池事件自由取捨、入夜打尾王，殺戮尖塔式節奏推進到最終魔王（見「§四·九 正式流程」）。
 
 ---
@@ -65,7 +65,7 @@
 | `core/Effect.js` | 把「定義＋境界＋連段」解算成實際傷害/護甲；卡面顯示數值。 | 改預設成長公式、改總傷計算、改卡面顯示的數字。 |
 | `core/MergeEngine.js` | **合成引擎**：同名自動合成（`resolveAutoMerges`）、忘形合成（`applyFormlessMerge`）、補抽機率（`drawChanceFor`）。產出劇本。 | 改合成規則、配對邏輯、補抽觸發、連鎖解算。 |
 | `core/ComboTracker.js` | 境界連段：出牌時累積 step、算倍率、`peek` 預覽。 | 改連段累積規則、中斷條件、倍率。 |
-| `core/RunState.js` | **一局江湖遠征的狀態機**（零 Phaser，run-meta 之上、BattleState 之下）：牌組跨戰保存、銀兩、主角血量、日程與事件池、尾王節奏（`dayBossKind`）、拖延加成（`battleConfig`）、速通拉霸代幣、`takeNode`/`callBoss`/`finishBattle`/`advanceDay`；牌組編輯 `addDeckCard`/`removeDeckCard`/`enchantDeckCard`（商店/拉霸/事件共用）。`STARTING_DECK` 在這。 | 改 run 流程、每日事件池、尾王節奏/縮放、戰後結算、起始牌組、牌組增刪附魔。 |
+| `core/RunState.js` | **一局江湖遠征的狀態機**（零 Phaser，run-meta 之上、BattleState 之下）：牌組跨戰保存、銀兩、主角血量、**主角屬性 `attrs`**（maxRealm/energyPerTurn/startingHandSize，可成長）、日程與事件池、尾王節奏（`dayBossKind`）、拖延加成（`battleConfig`）、速通拉霸代幣、遺物、`takeNode`/`callBoss`/`finishBattle`/`resolveEventChoice`；牌組編輯 `addDeckCard`/`removeDeckCard`/`enchantDeckCard`。`STARTING_DECK` 在這。 | 改 run 流程、每日事件池、尾王節奏/縮放、戰後結算、起始牌組、主角屬性、牌組增刪附魔。 |
 | `core/slot.js` | **三輪連線拉霸**（零 Phaser）：`spinReels`/`resolveSlotReward`（三連大獎：金/葫→銀兩、劍→加攻擊牌、毒/火→牌組附魔、囧→槓龜；兩連/全不同→小銀兩）/`spinSlot`/`applySlotReward`。速通代幣消化，數值在 `tuning.run.slot`。 | 改拉霸符號權重、賠付、獎池、附魔目標。 |
 | `core/RelicLibrary.js` | **遺物·秘籍**定義（一局內被動加成）：`onAcquire(run)`（拿到即生效，如 +血量上限）、`battleMods`（每場疊 energy/handSize…）、`hooks`（`onBattleStart`/`onTurnStart`，收 battle 本體）。來源：魔王打贏＋客棧。持有存 `RunState.relics`（只存 id）。 | 新增/改遺物、加新的 hook 時機。 |
 | `core/EventLibrary.js` | **奇遇·江湖事件**定義（白天池 'event' 節點內容）：每個事件一段敘事 ＋ 選項，選項 `resolve(run, rng)` 就地改 run、回 `{ text }`（立即）或 `{ text, battle, battleKind }`（觸發戰鬥）。文案在這、數值在 `tuning.run.event`。首批：野菇/賭坊/仇家堵路/荒廟寶箱/雲遊郎中。 | 新增/改奇遇、選項、結果。 |
@@ -143,6 +143,8 @@
 | 改連點抽牌的批次行為 | `scenes/BattleScene.js`（`requestDraw`/`pumpDraws`）＋ `config/tuning.js`（`drawBatchWindow`） |
 | 改 run 流程（每日事件池、尾王節奏、拖延加成、戰後結算） | `core/RunState.js` ＋ `config/tuning.js`（`run`） |
 | 新增/改遺物·秘籍 | `core/RelicLibrary.js`（`battleMods`/`hooks`/`onAcquire`）；戰鬥掛鉤在 `core/BattleState.js`（`runRelicHook`/`relicMod`） |
+| 改主角屬性·成長（境界上限/內力/起手/血量） | `core/RunState.js`（`attrs`，初值在 `config/tuning.js`）；覆蓋點 `core/BattleState.js` 建構子；成長來源 `RelicLibrary`（無形劍意）＋`EventLibrary`（高人指點） |
+| 新增/改奇遇 | `core/EventLibrary.js`（事件＋選項＋`resolve`），數值在 `config/tuning.js`（`run.event`） |
 | 改戰鬥的勝負條件、敵潮規模/波數 | `core/BattleState.js`（`checkOutcome`/`wavesLeft`）＋ `core/RunState.js`（`battleConfig`）＋ `config/tuning.js`（`run.battle`） |
 | 改白天地圖版面、節點、入夜按鈕 | `scenes/RunMapScene.js` |
 | 改傷害數字/連段的飄字演出 | `ui/Dummy.js` |
@@ -313,10 +315,13 @@
 - **遺物·秘籍**（`core/RelicLibrary.js`，Phase 3）：一局內被動加成。來源 —— **魔王打贏**（`finishBattle` 的
   `boss` 分支 `grantRandomRelic`）＋**客棧購買**（`buyRelic`）。持有存 `RunState.relics`（id）；戰鬥時由
   `battleConfig.relics` 帶進 `BattleState`，套 `battleMods`（energy/handSize）與 `hooks`（onBattleStart/onTurnStart）。
+- **主角屬性·境界上限**（`RunState.attrs`，Phase 4）：`maxRealm`/`energyPerTurn`/`startingHandSize` 初始自 tuning、跨戰保存、可成長。
+  `battleConfig.attrs` 帶進 `BattleState`，**覆蓋 `this.tuning` 的對應值**（連合成上限 `maxRealm` 一起流進 merge）。
+  成長來源：遺物**無形劍意**（境界上限 +1）、奇遇**高人指點**（花銀兩練內力/起手/境界上限）；血量上限走 `RunState.maxHp`（金鐘罩）。
 - **失敗＝硬核**：血量歸零 → run 結束回 GameOver（據點佔位）。跨戰保存的是**牌組/血量/銀兩/遺物**（`RunState`），
   局內境界合成照舊每場重置（見「§五」不變量）。
-- **後續階段**：Phase 1–3 已上線（run loop、拉霸、客棧商店、遺物、奇遇事件）—— **Phase 2/3 內容大致完備**。
-  剩 Phase 4 主角屬性·境界上限、Phase 5 據點·門派跨 run 經營。數值都在 `tuning.run`。
+- **後續階段**：Phase 1–4 已上線（run loop、拉霸、客棧商店、遺物、奇遇、主角屬性）。
+  剩 **Phase 5 據點·門派跨 run 經營**（run 結束帶回的永久解鎖）。數值都在 `tuning.run` / `tuning`（屬性初值）。
 
 ## 五、關鍵不變量與慣例（改動時別踩）
 
