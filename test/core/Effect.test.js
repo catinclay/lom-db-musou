@@ -1,0 +1,156 @@
+import { describe, it, expect } from 'vitest';
+import { resolveEffect, cardFaceValue } from '../../src/core/Effect.js';
+import { getCardDef } from '../../src/core/CardLibrary.js';
+
+const hengPi = () => getCardDef('hengPi'); // 單發傷害 7，走預設境界曲線
+const anqi = () => getCardDef('anqi');
+// 護甲牌已從遊戲移除，護甲成長用一個 inline 測試定義來驗（不依賴遊戲牌表）
+const armorCard = { base: { hits: 1, armor: 8 } };
+
+describe('預設成長（橫劈：境界加每發傷害、連段加發數）', () => {
+  it('境界一、無連段 ＝ 基礎值', () => {
+    const e = resolveEffect(hengPi(), 1, 1);
+    expect(e).toMatchObject({ hits: 1, damage: 7, totalDamage: 7 });
+  });
+
+  it('境界依曲線提升每發傷害（境界3 ＝ ×2.5 取整）', () => {
+    const e = resolveEffect(hengPi(), 3, 1);
+    expect(e.damage).toBe(18); // round(7 × 2.5)
+    expect(e.hits).toBe(1); // 無連段還是一發
+    expect(e.totalDamage).toBe(18);
+  });
+
+  it('連段加發數（劈砍兩次…），每發傷害不變', () => {
+    const e = resolveEffect(hengPi(), 1, 4);
+    expect(e.hits).toBe(4); // 連段4 ⇒ 揮 4 次
+    expect(e.damage).toBe(7); // 每發還是 7
+    expect(e.totalDamage).toBe(28);
+  });
+
+  it('境界（每發傷害）與連段（發數）各作用一維', () => {
+    const e = resolveEffect(hengPi(), 3, 2);
+    expect(e.damage).toBe(18); // round(7 × 2.5)
+    expect(e.hits).toBe(2); // 連段2 ⇒ 兩發
+    expect(e.totalDamage).toBe(36);
+  });
+
+  it('連段確實把發數乘上去', () => {
+    expect(resolveEffect(hengPi(), 5, 5).hits).toBe(5);
+  });
+});
+
+describe('★ 暗器：境界加傷害、連段加發數', () => {
+  it('基礎 ＝ 3 發 × 5 傷 ＝ 15', () => {
+    const e = resolveEffect(anqi(), 1, 1);
+    expect(e).toMatchObject({ hits: 3, damage: 5, totalDamage: 15 });
+  });
+
+  it('境界↑ ⇒ 每發更痛（依曲線），發數不變', () => {
+    const e = resolveEffect(anqi(), 4, 1);
+    expect(e.hits).toBe(3); // 發數沒變
+    expect(e.damage).toBe(20); // 5 × 4（境界4）
+    expect(e.totalDamage).toBe(60);
+  });
+
+  it('連段↑ ⇒ 發數變多，每發傷害不變', () => {
+    const e = resolveEffect(anqi(), 1, 3);
+    expect(e.hits).toBe(9); // 3 發 × 連段3
+    expect(e.damage).toBe(5); // 每發還是 5
+    expect(e.totalDamage).toBe(45);
+  });
+
+  it('境界與連段同時作用在不同維度上', () => {
+    const e = resolveEffect(anqi(), 2, 3);
+    expect(e.hits).toBe(9); // 3 × 連段3
+    expect(e.damage).toBe(8); // round(5 × 1.5)（境界2）
+    expect(e.totalDamage).toBe(72);
+  });
+
+  it('與橫劈差在基礎發數（連段機制現在相同，都是加發數）', () => {
+    const p = resolveEffect(hengPi(), 2, 3);
+    const a = resolveEffect(anqi(), 2, 3);
+    expect(p.hits).toBe(3); // 1 基礎發 × 連段3
+    expect(a.hits).toBe(9); // 3 基礎發 × 連段3
+  });
+});
+
+describe('護甲成長（預設境界曲線）', () => {
+  it('護甲照預設成長', () => {
+    const e = resolveEffect(armorCard, 2, 3);
+    expect(e.totalArmor).toBe(36); // round(8 × 1.5)（境界2）× 連段3
+    expect(e.totalDamage).toBe(0);
+  });
+
+  it('攻擊牌的 totalArmor 為 0', () => {
+    expect(resolveEffect(hengPi(), 3, 3).totalArmor).toBe(0);
+  });
+});
+
+describe('卡面數值', () => {
+  it('單發牌只顯示總量', () => {
+    expect(cardFaceValue(hengPi(), 3)).toMatchObject({ tag: '傷', text: '18', isDamage: true }); // round(7 × 2.5)
+  });
+
+  it('多發牌顯示「發數 × 每發」', () => {
+    expect(cardFaceValue(anqi(), 4)).toMatchObject({ tag: '傷', text: '3 × 20', hits: 3, per: 20 });
+  });
+
+  it('卡面不含連段（連段是出牌當下才知道的）', () => {
+    expect(cardFaceValue(anqi(), 1).text).toBe('3 × 5');
+  });
+
+  it('護甲牌標示為非傷害', () => {
+    expect(cardFaceValue(armorCard, 2)).toMatchObject({ isDamage: false, tag: '甲', text: '12' });
+  });
+});
+
+describe('功能牌：境界走溫和曲線，不吃等比', () => {
+  const yunQi = () => getCardDef('yunQi'); // 內力，線性：境界 N ＝ +N
+  const linJi = () => getCardDef('linJi'); // 抽牌，遞增：境界 N ＝ 抽 N+1
+
+  it('運氣調息：境界一 +1、境界三 +3（不是 +4）', () => {
+    expect(resolveEffect(yunQi(), 1, 1).energy).toBe(1);
+    expect(resolveEffect(yunQi(), 3, 1).energy).toBe(3);
+  });
+
+  it('臨機應變：境界一抽 2、境界二抽 3、境界三抽 4', () => {
+    expect(resolveEffect(linJi(), 1, 1).draw).toBe(2);
+    expect(resolveEffect(linJi(), 2, 1).draw).toBe(3);
+    expect(resolveEffect(linJi(), 3, 1).draw).toBe(4);
+  });
+
+  it('連段對功能牌是「加法」：+（step−1），不是乘', () => {
+    // 內力：境界2 基礎 +2，連段第 5 張 ⇒ 再 +4 ＝ 6
+    expect(resolveEffect(yunQi(), 2, 5).energy).toBe(6);
+    // 抽牌：境界2 基礎抽 3，連段第 5 張 ⇒ 再 +4 ＝ 7
+    expect(resolveEffect(linJi(), 2, 5).draw).toBe(7);
+  });
+
+  it('連段第一張不加成（step1 ＝ +0）', () => {
+    expect(resolveEffect(yunQi(), 3, 1).energy).toBe(3); // 境界3 基礎 +3，step1 不加
+    expect(resolveEffect(linJi(), 3, 1).draw).toBe(4); // 境界3 抽 4，step1 不加
+  });
+
+  it('使用者範例：臨機應變境界3、連段第3張 ⇒ 抽 4+2 ＝ 6', () => {
+    expect(resolveEffect(linJi(), 3, 3).draw).toBe(6);
+  });
+
+  it('卡面顯示：力/抽 標籤', () => {
+    expect(cardFaceValue(yunQi(), 3)).toMatchObject({ tag: '力', text: '＋3' });
+    expect(cardFaceValue(linJi(), 2)).toMatchObject({ tag: '抽', text: '3' });
+  });
+});
+
+describe('自訂成長函式', () => {
+  it('可以自訂成任意成長方式', () => {
+    const weird = {
+      base: { hits: 2, damage: 3 },
+      realmScale: (e, realm) => ({ ...e, hits: e.hits + realm }),
+      comboScale: (e, mult) => ({ ...e, damage: e.damage + mult }),
+    };
+    const e = resolveEffect(weird, 3, 4);
+    expect(e.hits).toBe(5); // 2 + 3
+    expect(e.damage).toBe(7); // 3 + 4
+    expect(e.totalDamage).toBe(35);
+  });
+});
