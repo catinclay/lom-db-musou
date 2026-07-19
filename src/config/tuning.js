@@ -232,6 +232,7 @@ export const TUNING = {
       cardPool: ['hengPi', 'guan', 'anqi', 'bengShan', 'duWu', 'huoYao', 'yunQi', 'linJi', 'wangXing'],
       cardPrice: { min: 14, max: 26 },
       removePrice: 20,
+      relicPrice: 45,
       rest: { price: 12, heal: 20 },
     },
   },

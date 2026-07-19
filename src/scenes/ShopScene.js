@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { RunState } from '../core/RunState.js';
 import { getCardDef } from '../core/CardLibrary.js';
+import { getRelicDef } from '../core/RelicLibrary.js';
 import { DeckOverlay } from '../ui/DeckOverlay.js';
 
 /**
@@ -18,6 +19,7 @@ export class ShopScene extends Phaser.Scene {
     this.run = data?.run ?? new RunState();
     this.shop = data?.shop ?? this.run.generateShop();
     this.offerObjs = [];
+    this.relicObjs = [];
 
     this.cameras.main.setBackgroundColor('#1a140e');
     this.add.text(800, 70, '🏮 客棧', {
@@ -56,6 +58,46 @@ export class ShopScene extends Phaser.Scene {
     this.restBtn.setAlpha(r.money >= this.shop.rest.price && r.hp < r.maxHp ? 1 : 0.45);
     this.removeBtn.setAlpha(r.money >= this.shop.removePrice && r.deck.length > 1 ? 1 : 0.45);
     this.renderOffers();
+    this.renderRelicOffer();
+  }
+
+  renderRelicOffer() {
+    for (const o of this.relicObjs) o.destroy();
+    this.relicObjs = [];
+    const offer = this.shop.relic;
+    if (!offer) return;
+    const def = getRelicDef(offer.id);
+    const affordable = !offer.sold && this.run.money >= offer.price;
+    const y = 545;
+
+    const rect = this.add
+      .rectangle(800, y, 640, 84, offer.sold ? 0x241d17 : 0x2c2440)
+      .setStrokeStyle(3, offer.sold ? 0x3a2f22 : 0xb06cc0);
+    const title = this.add
+      .text(800, y - 22, `【遺物】${def.name}`, {
+        fontFamily: 'sans-serif', fontSize: '22px', color: offer.sold ? '#5a4a38' : '#e0c8f0', fontStyle: 'bold',
+      })
+      .setOrigin(0.5);
+    const desc = this.add
+      .text(800, y + 12, offer.sold ? '── 售出 ──' : `${def.desc}　（${offer.price} 銀兩）`, {
+        fontFamily: 'sans-serif', fontSize: '16px',
+        color: offer.sold ? '#5a4a38' : affordable ? '#d8c9a8' : '#8d5a4a',
+      })
+      .setOrigin(0.5);
+
+    if (!offer.sold) {
+      rect.setInteractive({ useHandCursor: true });
+      rect.on('pointerover', () => rect.setStrokeStyle(4, 0xffe1b0));
+      rect.on('pointerout', () => rect.setStrokeStyle(3, 0xb06cc0));
+      rect.on('pointerdown', () => this.buyRelicClick());
+    }
+    this.relicObjs.push(rect, title, desc);
+  }
+
+  buyRelicClick() {
+    if (this.run.buyRelic(this.shop)) this.flash(`入手遺物：${getRelicDef(this.shop.relic.id).name}`);
+    else this.flash('銀兩不足');
+    this.refresh();
   }
 
   renderOffers() {

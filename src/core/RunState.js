@@ -1,5 +1,6 @@
 import { defaultRng } from './rng.js';
 import { TUNING } from '../config/tuning.js';
+import { RELIC_IDS, getRelicDef } from './RelicLibrary.js';
 
 /**
  * 一局「江湖遠征」的權威狀態。零 Phaser —— 場景讀它、驅動它，戰鬥仍是同一個 BattleState。
@@ -148,7 +149,7 @@ export class RunState {
       waves += Math.floor(d * r.dally.wavesPerEvent);
       eliteChance = Math.min(1, eliteChance + d * r.dally.eliteChancePerEvent);
     }
-    return { hp: this.hp, maxHp: this.maxHp, waves, rows: base.rows, eliteChance };
+    return { hp: this.hp, maxHp: this.maxHp, waves, rows: base.rows, eliteChance, relics: [...this.relics] };
   }
 
   /**
@@ -182,13 +183,38 @@ export class RunState {
       this.outcome = 'won';
       return { outcome: 'won', runOver: true, dayAdvanced: false, cleared: true, money };
     }
+    // 魔王（每 bossEveryDays 天）打贏給一件遺物
+    const relic = p.kind === 'boss' ? this.grantRandomRelic() : null;
     this.advanceDay();
-    return { outcome: 'won', runOver: false, dayAdvanced: true, money };
+    return { outcome: 'won', runOver: false, dayAdvanced: true, money, relic };
   }
 
   /** 推進到隔天（尾王打贏後）。 */
   advanceDay() {
     this.beginDay();
+  }
+
+  // ── 遺物·秘籍 ────────────────────────────────────────
+
+  ownsRelic(id) {
+    return this.relics.includes(id);
+  }
+
+  /** 拿到一件遺物（重複則跳過）：記錄 id、觸發 onAcquire。@returns 是否新拿到 */
+  addRelic(id) {
+    if (this.ownsRelic(id)) return false;
+    this.relics.push(id);
+    getRelicDef(id).onAcquire?.(this);
+    return true;
+  }
+
+  /** 隨機給一件「還沒有的」遺物。@returns 遺物 id，或 null（全收集了） */
+  grantRandomRelic() {
+    const pool = RELIC_IDS.filter((id) => !this.ownsRelic(id));
+    if (!pool.length) return null;
+    const id = pool[Math.floor(this.rng() * pool.length)];
+    this.addRelic(id);
+    return id;
   }
 
   // ── 牌組編輯（商店/拉霸/事件共用）──────────────────────
@@ -228,7 +254,7 @@ export class RunState {
 
   // ── 客棧（商店）──────────────────────────────────────
 
-  /** 生成一間客棧的貨架：cardCount 張待售招式（各帶價）＋ 刪牌/歇息服務。 */
+  /** 生成一間客棧的貨架：cardCount 張待售招式（各帶價）＋ 刪牌/歇息服務 ＋（有的話）一件遺物。 */
   generateShop() {
     const s = this.tuning.run.shop;
     const pool = [...s.cardPool];
@@ -238,7 +264,21 @@ export class RunState {
       const price = s.cardPrice.min + Math.floor(this.rng() * (s.cardPrice.max - s.cardPrice.min + 1));
       cards.push({ defId, price, sold: false });
     }
-    return { cards, removePrice: s.removePrice, rest: { ...s.rest } };
+    const relicPool = RELIC_IDS.filter((id) => !this.ownsRelic(id));
+    const relic = relicPool.length
+      ? { id: relicPool[Math.floor(this.rng() * relicPool.length)], price: s.relicPrice, sold: false }
+      : null;
+    return { cards, relic, removePrice: s.removePrice, rest: { ...s.rest } };
+  }
+
+  /** 買下貨架上的遺物。@returns 是否成交 */
+  buyRelic(shop) {
+    const offer = shop?.relic;
+    if (!offer || offer.sold || this.money < offer.price) return false;
+    if (!this.addRelic(offer.id)) return false;
+    this.money -= offer.price;
+    offer.sold = true;
+    return true;
   }
 
   /** 買下貨架第 i 張招式（加進牌組）。@returns 是否成交 */

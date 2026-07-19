@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { RunState } from '../core/RunState.js';
+import { getRelicDef } from '../core/RelicLibrary.js';
 import { DeckOverlay } from '../ui/DeckOverlay.js';
 
 /**
@@ -39,6 +40,9 @@ export class RunMapScene extends Phaser.Scene {
     this.hint = this.add
       .text(800, 150, '', { fontFamily: 'sans-serif', fontSize: '15px', color: '#9c8a70' })
       .setOrigin(0.5);
+    this.relicText = this.add
+      .text(800, 186, '', { fontFamily: 'sans-serif', fontSize: '16px', color: '#c9a8e0' })
+      .setOrigin(0.5);
 
     // 入夜決戰按鈕
     this.bossBtn = this.makeButton(800, 800, 420, 76, '', 0x5a2020, 0xc4583f, () => this.goBoss());
@@ -65,6 +69,9 @@ export class RunMapScene extends Phaser.Scene {
     );
     const bk = r.dayBossKind();
     this.bossTxt?.setText(`入夜決戰 — ${BOSS_LABEL[bk] ?? bk}`);
+
+    const relics = r.relics.map((id) => getRelicDef(id).name);
+    this.relicText.setText(relics.length ? `遺物：${relics.join('　')}` : '遺物：（無）');
   }
 
   /** 事件池排成 5×2 的格子，逐格可點。 */

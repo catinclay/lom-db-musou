@@ -404,3 +404,37 @@ describe('有限戰鬥（勝負判定）', () => {
     expect(b.outcome).toBe('won');
   });
 });
+
+describe('遺物·秘籍（BattleState 掛鉤）', () => {
+  const withRelics = (relics, deck = ['hengPi']) =>
+    new BattleState({ deckList: deckOf(deck), rng: seededRng(1), tuning: TUNING, battle: { relics } });
+
+  it('玄鐵令：每回合內力 +1', () => {
+    const b = withRelics(['xuanTie']);
+    b.start();
+    expect(b.energy).toBe(TUNING.energyPerTurn + 1);
+  });
+
+  it('百寶囊：起手多抽一張', () => {
+    const deck = ['pi', 'ci', 'dang', 'buFa', 'saoTang', 'anqi']; // 6 張不同名，不會合成
+    const plain = new BattleState({ deckList: deckOf(deck), rng: seededRng(1), tuning: TUNING });
+    plain.start();
+    const bag = new BattleState({ deckList: deckOf(deck), rng: seededRng(1), tuning: TUNING, battle: { relics: ['baiBao'] } });
+    bag.start();
+    expect(bag.hand.size).toBe(plain.hand.size + 1);
+  });
+
+  it('淬毒袖箭：每回合開始最前排敵人中毒 4', () => {
+    const b = withRelics(['cuiDu']);
+    b.start();
+    expect(b.formation.frontLivingEnemy().statuses.poison).toBe(4);
+  });
+
+  it('引燃索：戰鬥開始最近一排敵人燃燒 3', () => {
+    const b = withRelics(['yinRan']);
+    b.start();
+    const near = b.formation.enemiesInRanks(b.formation.nearestRanks(1));
+    expect(near.length).toBeGreaterThan(0);
+    expect(near.every((e) => e.statuses.burn === 3)).toBe(true);
+  });
+});

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { BattleState } from '../core/BattleState.js';
 import { RunState } from '../core/RunState.js';
 import { EVENT } from '../core/events.js';
+import { getRelicDef } from '../core/RelicLibrary.js';
 import { DeckOverlay } from '../ui/DeckOverlay.js';
 import { HandView } from '../ui/HandView.js';
 import { MergeAnimator } from '../ui/MergeAnimator.js';
@@ -77,6 +78,8 @@ export class BattleScene extends Phaser.Scene {
       }
     });
     this.battle.bus.on(EVENT.STATUS_TICKED, (r) => this.formationView.playStatusTick(r));
+    // 遺物在回合開始可能給敵人上狀態 —— 刷新一下敵陣狀態點（sprite 已存在時才有作用）
+    this.battle.bus.on(EVENT.TURN_STARTED, () => this.formationView.refresh());
     // 出牌清空整片後下一波「立刻湧上」（BattleState.maybeRushNextWave）—— 補間演出＋提示
     this.battle.bus.on(EVENT.ENEMIES_ADVANCED, (r) => {
       if (r.rushIn) {
@@ -389,10 +392,16 @@ export class BattleScene extends Phaser.Scene {
     if (outcome === 'ongoing') return;
     this._concluded = true;
 
+    // 先結算（血量寫回、給獎、可能拿遺物），再依結果安排轉場
+    const res = this.run.finishBattle(this.battle);
     if (outcome === 'won') this.flash('殲滅！', 0xd9b45c);
+    if (res.relic) {
+      this.time.delayedCall(Math.max(1, 400 / this.handView.speed), () =>
+        this.flash(`獲得遺物：${getRelicDef(res.relic).name}`, 0xb06cc0)
+      );
+    }
 
-    this.time.delayedCall(Math.max(1, 800 / this.handView.speed), () => {
-      const res = this.run.finishBattle(this.battle);
+    this.time.delayedCall(Math.max(1, (res.relic ? 1500 : 800) / this.handView.speed), () => {
       if (res.runOver) {
         this.scene.start('GameOver', { run: this.run, result: res.outcome, cleared: res.cleared });
       } else if (res.dayAdvanced && this.run.slotTokens > 0) {

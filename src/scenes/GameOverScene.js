@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { RunState } from '../core/RunState.js';
+import { getRelicDef } from '../core/RelicLibrary.js';
 
 /**
  * 一局結束（通關或敗北）。Phase 1 的「據點」佔位：顯示結果與戰績，一鍵再闖。
@@ -31,6 +32,15 @@ export class GameOverScene extends Phaser.Scene {
           fontFamily: 'sans-serif',
           fontSize: '22px',
           color: '#d8c9a8',
+        })
+        .setOrigin(0.5);
+
+      const relics = run.relics.map((id) => getRelicDef(id).name);
+      this.add
+        .text(800, 446, relics.length ? `遺物：${relics.join('　')}` : '遺物：（無）', {
+          fontFamily: 'sans-serif',
+          fontSize: '18px',
+          color: '#c9a8e0',
         })
         .setOrigin(0.5);
     }

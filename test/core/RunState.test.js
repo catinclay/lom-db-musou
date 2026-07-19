@@ -225,3 +225,57 @@ describe('客棧（商店）', () => {
     expect(r.restAtInn(r.generateShop())).toBe(false);
   });
 });
+
+describe('遺物·秘籍', () => {
+  it('addRelic：不重複、觸發 onAcquire（金鐘罩 +25 血上限並回血）', () => {
+    const r = run();
+    const before = r.maxHp;
+    expect(r.addRelic('jinZhong')).toBe(true);
+    expect(r.maxHp).toBe(before + 25);
+    expect(r.addRelic('jinZhong')).toBe(false); // 重複不再拿
+    expect(r.relics).toEqual(['jinZhong']);
+  });
+
+  it('grantRandomRelic：給沒有的；全收集了回 null', () => {
+    const r = run();
+    const id = r.grantRandomRelic();
+    expect(id).toBeTruthy();
+    expect(r.ownsRelic(id)).toBe(true);
+    let guard = 20;
+    while (r.grantRandomRelic() && guard-- > 0);
+    expect(r.grantRandomRelic()).toBeNull();
+  });
+
+  it('battleConfig 帶上目前遺物', () => {
+    const r = run();
+    r.addRelic('xuanTie');
+    expect(r.battleConfig('battle', false).relics).toContain('xuanTie');
+  });
+
+  it('客棧賣遺物、買得起就入手', () => {
+    const r = run();
+    r.money = 100;
+    const shop = r.generateShop();
+    expect(shop.relic).not.toBeNull(); // 第一天沒收集任何遺物，必有貨
+    const id = shop.relic.id;
+    expect(r.buyRelic(shop)).toBe(true);
+    expect(r.ownsRelic(id)).toBe(true);
+    expect(shop.relic.sold).toBe(true);
+    expect(r.buyRelic(shop)).toBe(false); // 售出了
+  });
+
+  it('魔王打贏給一件遺物、小王不給', () => {
+    const r = run();
+    while (r.day < 3) r.advanceDay(); // 第 3 天 = 魔王
+    expect(r.dayBossKind()).toBe('boss');
+    r.callBoss();
+    const res = r.finishBattle({ playerHp: 40, outcome: 'won' });
+    expect(res.relic).toBeTruthy();
+    expect(r.relics).toContain(res.relic);
+
+    // 隔天（第 4 天）= 小王，不給遺物
+    r.callBoss();
+    const res2 = r.finishBattle({ playerHp: 40, outcome: 'won' });
+    expect(res2.relic).toBeNull();
+  });
+});

@@ -8,6 +8,7 @@ import { resolveAutoMerges, applyFormlessMerge } from './MergeEngine.js';
 import { Formation } from './Formation.js';
 import { resolveAttack, TARGET } from './combat.js';
 import { applyStatus, resolveStatusTick } from './StatusLibrary.js';
+import { getRelicDef } from './RelicLibrary.js';
 import { TX } from './transcript.js';
 import { EventBus, EVENT } from './events.js';
 import { TUNING } from '../config/tuning.js';
@@ -64,8 +65,24 @@ export class BattleState {
     this.formation = new Formation(this.tuning.combat.lanes, this.tuning.combat.maxRank, this.rng);
     this.formation.refill(bc.rows ?? this.tuning.combat.rows, this.enemySpec());
 
+    this.runRelicHook('onBattleStart'); // 遺物：戰鬥開場一次性效果（如給敵陣上狀態）
     this.bus.emit(EVENT.BATTLE_STARTED, { state: this });
     return this.startTurn();
+  }
+
+  /** 這場戰鬥帶的遺物定義（由 battleConfig.relics 的 id 解算）。 */
+  relicDefs() {
+    return (this.battleConfig.relics ?? []).map(getRelicDef);
+  }
+
+  /** 匯總所有遺物 battleMods 的某個數值（energy / handSize…）。 */
+  relicMod(key) {
+    return this.relicDefs().reduce((s, r) => s + (r.battleMods?.[key] ?? 0), 0);
+  }
+
+  /** 依序呼叫遺物的某個 hook（收到 battle 本體）。 */
+  runRelicHook(name, ...args) {
+    for (const r of this.relicDefs()) r.hooks?.[name]?.(this, ...args);
   }
 
   /** 生成新排時用的敵種與人數（可注入 rng，測試才不會擲骰子）。數值可由 battleConfig 覆寫。 */
@@ -103,7 +120,7 @@ export class BattleState {
   /** @returns transcript */
   startTurn() {
     this.turn += 1;
-    this.energy = this.tuning.energyPerTurn;
+    this.energy = this.tuning.energyPerTurn + this.relicMod('energy'); // 遺物：內力加成
     this.damageThisTurn = 0;
     this.mergesThisTurn = 0;
     this.armor = 0; // 護甲是「格擋」，每回合重置（敵人上回合結束已結算過）
@@ -111,9 +128,11 @@ export class BattleState {
 
     // 先把該抽的牌一次抽完，再一口氣解算合成 ——
     // 不是抽一張算一次，否則玩家看不出「這批牌湊出了什麼」。
-    const transcript = this.drawCards(this.tuning.startingHandSize);
+    const handSize = this.tuning.startingHandSize + this.relicMod('handSize'); // 遺物：起手張數
+    const transcript = this.drawCards(handSize);
     transcript.push(...resolveAutoMerges(this, this.tuning));
 
+    this.runRelicHook('onTurnStart'); // 遺物：每回合開始效果（如給敵人上狀態）
     this.bus.emit(EVENT.TURN_STARTED, { turn: this.turn });
     this.bus.emit(EVENT.TRANSCRIPT, transcript);
     return transcript;
