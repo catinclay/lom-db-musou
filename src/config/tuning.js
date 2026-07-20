@@ -165,9 +165,16 @@ export const TUNING = {
         attackRange: 2,
         isBoss: true,
         specials: [
-          { id: 'summon', type: 'summon', chance: 0.4, chargeTurns: 1, cooldownTurns: 2, summonDefId: 'kuaiDao', summonCount: 3 },
+          { id: 'summon', type: 'summon', chance: 0.35, chargeTurns: 1, cooldownTurns: 3, summonDefId: 'kuaiDao', summonCount: 3 },
+          // 投射物：只在遠距離（rank ≥ minRank）施放；投射物每次「出牌」前進一格,碰玩家造成 projDamage。
+          { id: 'projectile', type: 'projectile', chance: 0.45, chargeTurns: 1, cooldownTurns: 2, minRank: 2, projDamage: 10 },
+          // 後退：玩家逼近（rank ≤ maxRankToTrigger）時拉開距離。
+          { id: 'retreat', type: 'retreat', chance: 0.5, chargeTurns: 0, cooldownTurns: 2, steps: 1, maxRankToTrigger: 1 },
         ],
       },
+
+      /** 投射物：以「1 滴血的敵人」存在,可被玩家攻擊打掉；每次出牌前進,碰玩家造成傷害後消失。 */
+      projectile: { hp: 1, damage: 10, prepareTurns: 0 },
     },
 
     /**

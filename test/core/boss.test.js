@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Formation, createEnemy, resetEnemyUid } from '../../src/core/Formation.js';
+import { Formation, createEnemy, createProjectile, resetEnemyUid } from '../../src/core/Formation.js';
 import { BattleState } from '../../src/core/BattleState.js';
 import { isBossDef } from '../../src/core/EnemyLibrary.js';
 import { seededRng } from '../../src/core/rng.js';
@@ -156,6 +156,75 @@ describe('特殊行動：召喚 / 後退（specials 陣列）', () => {
     boss.specialCooldowns.summon = 0;
     f.planSpecialIntents();
     expect(boss.intent).toMatchObject({ id: 'summon' });
+  });
+});
+
+describe('投射物', () => {
+  it('launchProjectile 在王前方一格（同路）生成', () => {
+    const f = new Formation(7, 6, seededRng(1));
+    f.enemies.push(createEnemy('moWang', 3, 4));
+    const boss = f.at(3, 4);
+    const proj = f.launchProjectile(boss, 9);
+    expect(proj.isProjectile).toBe(true);
+    expect(proj.rank).toBe(2);
+    expect(proj.lane).toBe(4);
+    expect(proj.damage).toBe(9);
+  });
+
+  it('每次呼叫 advanceProjectiles 前進一格；越過最前線即命中並消失', () => {
+    const f = new Formation(7, 6, seededRng(1));
+    f.enemies.push(createProjectile(1, 3, 7));
+    expect(f.advanceProjectiles()).toMatchObject({ moved: true, damage: 0 }); // 1 → 0
+    expect(f.living[0].rank).toBe(0);
+    const res = f.advanceProjectiles(); // 0 → 命中
+    expect(res.damage).toBe(7);
+    expect(res.hits.length).toBe(1);
+    expect(f.living.some((e) => e.isProjectile)).toBe(false); // 命中後消失
+  });
+
+  it('投射物不隨敵方相位（advance）移動', () => {
+    const f = new Formation(7, 6, seededRng(1));
+    f.enemies.push(createProjectile(3, 3, 5));
+    f.advance();
+    expect(f.at(3, 3)).toBeTruthy(); // 沒被 advance 往前推
+  });
+
+  it('投射物可被攻擊打掉（1 滴血）', () => {
+    const f = new Formation(7, 6, seededRng(1));
+    const proj = createProjectile(2, 3, 5);
+    f.enemies.push(proj);
+    f.damageEnemy(proj, 1);
+    expect(proj.alive).toBe(false);
+    expect(f.living.some((e) => e.isProjectile)).toBe(false);
+  });
+
+  it('投射物只在遠距離施放（rank ≥ minRank）', () => {
+    const f = new Formation(7, 6, () => 0); // chance 必中
+    f.enemies.push(createEnemy('moWang', 1, 3));
+    const boss = f.at(1, 3);
+    boss.specialCooldowns.summon = 9; // 排除干擾,只留投射物候選
+    boss.specialCooldowns.retreat = 9;
+    f.planSpecialIntents();
+    expect(boss.intent).toBeNull(); // rank1 < minRank2,不施放
+    boss.rank = 3;
+    f.planSpecialIntents();
+    expect(boss.intent).toMatchObject({ id: 'projectile' });
+  });
+
+  it('BattleState.playCard 會推進投射物並對玩家造成傷害', () => {
+    const b = new BattleState({
+      deckList: [{ defId: 'yunQi' }],
+      rng: seededRng(5),
+      tuning: { ...noDrawMerge, startingHandSize: 1 },
+      battle: { waves: 0, rows: 1, minPerRow: 1, maxPerRow: 1, gruntDefIds: ['luo'], eliteChance: 0 },
+    });
+    b.start();
+    const hpBefore = b.playerHp;
+    b.formation.enemies.push(createProjectile(0, 3, 6)); // 貼臉的投射物
+    const uid = b.hand.get(0).uid;
+    b.playCard(uid); // 出一張技能牌 → 投射物越線命中
+    expect(b.playerHp).toBe(hpBefore - 6);
+    expect(b.formation.living.some((e) => e.isProjectile)).toBe(false);
   });
 });
 

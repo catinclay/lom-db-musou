@@ -13,6 +13,7 @@ export const ENEMY_DEFS = {
   dingZhuang: enemy('dingZhuang', '定樁力士', 0x4e7180),
   touMu: enemy('touMu', '頭目', 0xb03a3a),
   moWang: enemy('moWang', '魔王', 0x6a2ca0),
+  projectile: enemy('projectile', '勁氣', 0xe0d060),
 };
 
 /** 是否為精英/魔王（大血條、遠程、finale 登場）。 */

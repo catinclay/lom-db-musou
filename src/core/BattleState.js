@@ -274,6 +274,24 @@ export class BattleState {
     };
   }
 
+  /**
+   * 投射物前進一步（每次出牌呼叫）：命中玩家者先扣護甲再扣血並消失。
+   * @returns advanceProjectiles 的結果,或 null（沒有投射物）
+   */
+  advanceProjectiles() {
+    const res = this.formation.advanceProjectiles();
+    if (!res.moved) return null;
+    if (res.damage > 0) {
+      const blocked = Math.min(this.armor, res.damage);
+      this.armor -= blocked;
+      const hpDamage = res.damage - blocked;
+      this.playerHp = Math.max(0, this.playerHp - hpDamage);
+      this.bus.emit(EVENT.PLAYER_HIT, { damage: hpDamage, blocked, hp: this.playerHp });
+    }
+    this.bus.emit(EVENT.ENEMIES_ADVANCED, { formation: this.formation, projectiles: true, hits: res.hits });
+    return res;
+  }
+
   /** @returns transcript 片段（只含 DRAW / DRAW_FIZZLE，不解算合成） */
   drawCards(n) {
     const transcript = [];
@@ -370,6 +388,10 @@ export class BattleState {
         );
       }
     }
+
+    // 出牌＝一格時間流逝：玩家出招（可能已打掉投射物）後,存活的投射物前進一格、可能命中玩家。
+    const proj = this.advanceProjectiles();
+    if (proj) result.projectiles = proj;
 
     const clearReward = this.rewardClearIfNeeded();
     if (clearReward) {

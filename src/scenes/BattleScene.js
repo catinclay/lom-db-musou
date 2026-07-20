@@ -87,6 +87,10 @@ export class BattleScene extends Phaser.Scene {
       if (r.challenge) {
         this.formationView.sync(this.battle.formation);
         this.flash('再來啊！', 0xd9b45c);
+      } else if (r.projectiles || r.bossEntered) {
+        // 投射物出牌時前進 / 王登場：即時同步敵陣（不在正常敵方相位）。
+        this.formationView.sync(this.battle.formation);
+        if (r.bossEntered) this.flash('強敵現身！', 0xc4583f);
       }
     });
     this.battle.bus.on(EVENT.ARMOR_GAINED, (r) =>

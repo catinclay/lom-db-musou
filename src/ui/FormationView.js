@@ -397,7 +397,9 @@ export class FormationView {
           ? { text: `召喚 ＋${action.summoned}`, color: '#e0a0f0' }
           : action.type === 'retreat'
             ? { text: '後退', color: '#c9a8e0' }
-            : { text: `不動 ＋${action.added}`, color: '#9fd0e8' };
+            : action.type === 'projectile'
+              ? { text: '施法', color: '#e0d060' }
+              : { text: `不動 ＋${action.added}`, color: '#9fd0e8' };
       const label = this.scene.add
         .text(s.x, s.y - 185 * s.scaleY, spec.text, {
           fontFamily: 'sans-serif', fontSize: '20px', color: spec.color, fontStyle: 'bold',

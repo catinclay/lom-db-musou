@@ -39,6 +39,17 @@ export function createEnemy(defId, rank, lane) {
   };
 }
 
+/**
+ * 生成一枚投射物（以「1 滴血的敵人」存在,好讓玩家的攻擊天生就能鎖定打掉它）。
+ * 不隨敵方相位移動、不備戰;靠 Formation.advanceProjectiles 在每次出牌時前進、命中玩家。
+ */
+export function createProjectile(rank, lane, damage) {
+  const e = createEnemy('projectile', rank, lane);
+  e.isProjectile = true;
+  e.damage = damage;
+  return e;
+}
+
 export class Formation {
   constructor(lanes = 7, maxRank = 6, rng = defaultRng) {
     this.lanes = lanes;
@@ -204,6 +215,7 @@ export class Formation {
   /** 已在攻擊線的敵人推進一格準備：黃 2 → 黃 1 → 紅。 */
   progressContactPreparation(skip = new Set()) {
     for (const e of this.living) {
+      if (e.isProjectile) continue;
       if (!this.inAttackRange(e) || e.attackState !== 'charging' || skip.has(e.uid)) continue;
       e.prepareRemaining = Math.max(0, e.prepareRemaining - 1);
       if (e.prepareRemaining === 0) e.attackState = 'ready';
@@ -213,6 +225,7 @@ export class Formation {
   /** 新進攻擊線者開始完整準備；被推出攻擊線者清空進度。 */
   initializeContactPreparation() {
     for (const e of this.living) {
+      if (e.isProjectile) continue; // 投射物不備戰,靠 advanceProjectiles 直接命中
       if (this.inAttackRange(e) && e.attackState === 'none') this.beginAttackPreparation(e);
       else if (!this.inAttackRange(e) && e.attackState !== 'none') this.clearAttackPreparation(e);
     }
@@ -264,7 +277,42 @@ export class Formation {
     if (sp.type === 'retreat') {
       return this.retreatEnemy(enemy, sp.steps ?? 1) ? base : null;
     }
+    if (sp.type === 'projectile') {
+      const proj = this.launchProjectile(enemy, sp.projDamage ?? enemy.damage);
+      return proj ? { ...base, projectileUid: proj.uid } : null;
+    }
     return null;
+  }
+
+  /** 在王前方一格（同一路,朝玩家）生成一枚投射物。前方無空格則作罷。@returns 投射物或 null */
+  launchProjectile(enemy, damage) {
+    const rank = enemy.rank - 1;
+    if (rank < 0 || this.at(rank, enemy.lane)) return null;
+    const proj = createProjectile(rank, enemy.lane, damage);
+    this.enemies.push(proj);
+    return proj;
+  }
+
+  /**
+   * 投射物前進：每次「出牌」呼叫一次。每枚往前一格；越過最前線（rank < 0）即命中玩家並消失。
+   * @returns { moved:bool, damage:總命中傷害, hits:[uid...] } 供 UI 演出
+   */
+  advanceProjectiles() {
+    let damage = 0;
+    const hits = [];
+    let moved = false;
+    for (const p of this.living.filter((e) => e.isProjectile)) {
+      moved = true;
+      const to = p.rank - 1;
+      if (to < 0) {
+        damage += p.damage;
+        hits.push(p.uid);
+        p.alive = false;
+      } else {
+        p.rank = to;
+      }
+    }
+    return { moved, damage, hits };
   }
 
   /**
@@ -298,10 +346,12 @@ export class Formation {
   /** 為下一個敵人相位規劃特殊行動；移動本身不建立頭頂意圖。每敵最多預告一個。 */
   planSpecialIntents() {
     for (const e of this.living) {
-      if (e.rank === 0 || e.intent) continue;
+      if (e.isProjectile || e.rank === 0 || e.intent) continue;
       for (const sp of enemySpecials(getEnemyDef(e.defId))) {
         if ((e.specialCooldowns[sp.id] ?? 0) > 0) continue;
         if (sp.buffId && (e.buffs[sp.buffId] ?? 0) >= sp.buffCap) continue;
+        if (sp.minRank != null && e.rank < sp.minRank) continue; // 如投射物只在遠距離施放
+        if (sp.maxRankToTrigger != null && e.rank > sp.maxRankToTrigger) continue; // 如後退只在玩家逼近時
         if (this.rng() < sp.chance) {
           e.intent = { id: sp.id, remaining: sp.chargeTurns };
           break;
@@ -321,6 +371,7 @@ export class Formation {
    */
   advance({ stay = new Set() } = {}) {
     for (const e of this.livingEnemiesInOrder()) {
+      if (e.isProjectile) continue; // 投射物只在「出牌」時前進,不隨敵方相位移動
       // 到達自身射程（雜兵＝rank 0；遠程王＝更遠）即停止前進，在該處備戰。
       if (this.inAttackRange(e) || stay.has(e.uid)) continue;
       const r = e.rank;
