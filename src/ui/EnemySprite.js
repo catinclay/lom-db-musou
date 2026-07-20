@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { getEnemyDef } from '../core/EnemyLibrary.js';
+import { ENEMY_BUFF_DEFS, activeEnemyBuffs, getEnemyDef } from '../core/EnemyLibrary.js';
 import { STATUS_DEFS, STATUS_IDS, activeStatuses } from '../core/StatusLibrary.js';
 import { ENEMY_TEX } from './enemyTextures.js';
 
@@ -18,20 +18,37 @@ export class EnemySprite extends Phaser.GameObjects.Container {
     this.body = scene.add.image(0, 0, ENEMY_TEX).setOrigin(0.5, 1).setTint(def.tint);
     this.add(this.body);
 
-    // 攻擊準備提示（telegraph）：備戰中的接觸敵人頭上亮起紅色驚嘆號
+    // 攻擊意圖：準備中黃！＋剩餘回合；完成後紅！，代表下回合攻擊。
     this.warn = scene.add
-      .text(0, -196, '！', { fontFamily: 'sans-serif', fontSize: '40px', color: '#ff5a3c', fontStyle: 'bold' })
+      .text(0, -214, '！', { fontFamily: 'sans-serif', fontSize: '38px', color: '#f0c94f', fontStyle: 'bold' })
       .setOrigin(0.5)
       .setVisible(false);
     this.add(this.warn);
+    this.warnCount = scene.add
+      .text(21, -210, '', { fontFamily: 'sans-serif', fontSize: '20px', color: '#f0c94f', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setVisible(false);
+    this.add(this.warnCount);
+
+    // 距離外的特殊行動才顯示意圖；單純移動不畫，避免滿場箭頭。
+    this.specialWarn = scene.add
+      .text(0, -214, '◆', { fontFamily: 'sans-serif', fontSize: '30px', color: '#c9a8e0', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setVisible(false);
+    this.add(this.specialWarn);
+    this.specialLabel = scene.add
+      .text(0, -190, '扎馬', { fontFamily: 'sans-serif', fontSize: '13px', color: '#dec9ed', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setVisible(false);
+    this.add(this.specialLabel);
 
     this.hpBg = scene.add.rectangle(0, -162, 72, 9, 0x000000, 0.55).setOrigin(0.5);
     this.hpFill = scene.add.rectangle(-35, -162, 70, 7, 0x8fd06a).setOrigin(0, 0.5);
     this.add(this.hpBg);
     this.add(this.hpFill);
 
-    // debuff 小點：每種狀態一顆，血條上方一排；層數 > 1 時在點上疊層數
-    this.statusPips = STATUS_IDS.map(() => {
+    // buff/debuff 小點共用一排；層數 > 1 時在點上疊層數。
+    this.statusPips = [...STATUS_IDS, ...Object.keys(ENEMY_BUFF_DEFS)].map(() => {
       const box = scene.add.rectangle(0, -178, 14, 14, 0xffffff).setVisible(false);
       const txt = scene.add
         .text(0, -178, '', { fontFamily: 'sans-serif', fontSize: '10px', color: '#14100c', fontStyle: 'bold' })
@@ -54,18 +71,28 @@ export class EnemySprite extends Phaser.GameObjects.Container {
     this.hpFill.setVisible(r > 0 && r < 1);
     this.hpBg.setVisible(r > 0 && r < 1);
 
-    // 備戰：亮紅驚嘆號、身體轉紅熱
-    const prep = this.enemy.prepared;
-    this.warn.setVisible(prep);
-    this.body.setTint(prep ? 0xff5a3c : this.tint);
+    const charging = this.enemy.attackState === 'charging';
+    const ready = this.enemy.attackState === 'ready';
+    this.warn.setColor(ready ? '#ff5a3c' : '#f0c94f').setVisible(charging || ready);
+    this.warnCount
+      .setColor('#f0c94f')
+      .setText(charging ? `${this.enemy.prepareRemaining}` : '')
+      .setVisible(charging);
+    this.body.setTint(ready ? 0xff5a3c : this.tint);
 
-    const active = activeStatuses(this.enemy);
+    const special = this.enemy.rank > 0 && this.enemy.intent?.id === 'brace';
+    this.specialWarn.setVisible(special);
+    this.specialLabel.setVisible(special);
+
+    const active = [
+      ...activeStatuses(this.enemy).map((id) => ({ id, stacks: this.enemy.statuses[id], def: STATUS_DEFS[id] })),
+      ...activeEnemyBuffs(this.enemy).map((id) => ({ id, stacks: this.enemy.buffs[id], def: ENEMY_BUFF_DEFS[id] })),
+    ];
     this.statusPips.forEach((pip, i) => {
       if (i < active.length) {
-        const id = active[i];
-        const stacks = this.enemy.statuses[id] ?? 0;
+        const { stacks, def } = active[i];
         const x = (i - (active.length - 1) / 2) * 18; // 置中排列
-        pip.box.fillColor = STATUS_DEFS[id].color;
+        pip.box.fillColor = def.color;
         pip.box.x = x;
         pip.box.setVisible(true);
         pip.txt.x = x;

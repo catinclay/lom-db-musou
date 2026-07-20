@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
+import { TitleScene } from './scenes/TitleScene.js';
 import { BaseScene } from './scenes/BaseScene.js';
+import { FacilityScene } from './scenes/FacilityScene.js';
 import { RunMapScene } from './scenes/RunMapScene.js';
 import { BattleScene } from './scenes/BattleScene.js';
 import { ShopScene } from './scenes/ShopScene.js';
@@ -29,7 +31,7 @@ const config = {
     width: 1600,
     height: 900,
   },
-  scene: [BaseScene, RunMapScene, BattleScene, ShopScene, SlotScene, EventScene],
+  scene: [TitleScene, BaseScene, FacilityScene, RunMapScene, BattleScene, ShopScene, SlotScene, EventScene],
 };
 
 new Phaser.Game(config);

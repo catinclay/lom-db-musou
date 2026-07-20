@@ -73,18 +73,18 @@ export class BattleScene extends Phaser.Scene {
       if (r.knockback && r.waveLayouts?.length) {
         this.formationView.playKnockbackWaves(r.hits, r.waveLayouts, this.battle.formation);
       } else {
-        this.formationView.playHitFlourish(r.target, r.hits);
+        this.formationView.playHitFlourish(r.target, r.hits, r.areas, this.battle.formation);
         this.formationView.flashAndPop(r.hits);
       }
     });
     this.battle.bus.on(EVENT.STATUS_TICKED, (r) => this.formationView.playStatusTick(r));
     // 遺物在回合開始可能給敵人上狀態 —— 刷新一下敵陣狀態點（sprite 已存在時才有作用）
     this.battle.bus.on(EVENT.TURN_STARTED, () => this.formationView.refresh());
-    // 出牌清空整片後下一波「立刻湧上」（BattleState.maybeRushNextWave）—— 補間演出＋提示
+    // 清場後由玩家主動叫陣時，一次同步整個補充波。
     this.battle.bus.on(EVENT.ENEMIES_ADVANCED, (r) => {
-      if (r.rushIn) {
+      if (r.challenge) {
         this.formationView.sync(this.battle.formation);
-        this.flash('敵潮補上！', 0xd9b45c);
+        this.flash('再來啊！', 0xd9b45c);
       }
     });
     this.battle.bus.on(EVENT.ARMOR_GAINED, (r) =>
@@ -130,6 +130,9 @@ export class BattleScene extends Phaser.Scene {
       this.handView.updateCardHints(this.battle.combo.lastRealm, this.battle.energy);
       // 演出進行中不讓按結束回合（避免打斷連鎖）
       this.endTurnBtn?.setAlpha(this.animator.playing || this._concluded ? 0.4 : 1);
+      const canChallenge = this.battle.awaitingWaveChoice && this.battle.formation.isEmpty && this.battle.hasReinforcements;
+      this.setSideButtonVisible(this.challengeBtn, canChallenge);
+      this.challengeBtn?.setAlpha(this.animator.playing || this._concluded ? 0.4 : 1);
     }
   }
 
@@ -140,7 +143,8 @@ export class BattleScene extends Phaser.Scene {
     const p = this.run.pending;
     const kind = p?.kind ?? '—';
     const label = { elite: '小王', boss: '魔王', final: '最終魔王', battle: '廝殺' }[kind] ?? kind;
-    return `第 ${this.run.day} 天 · ${label}　補充波剩 ${w}`;
+    const rows = this.battle.rowsLeftInWave;
+    return `第 ${this.run.day} 天 · ${label}　補充波剩 ${w}　·　本波未進場 ${rows} 排`;
   }
 
   drawRankLines() {
@@ -237,6 +241,13 @@ export class BattleScene extends Phaser.Scene {
       .setOrigin(1, 0.5)
       .setDepth(5002);
 
+    // 清場後才出現的叫陣按鈕；玩家也可照常結束回合，只補一排。
+    this.challengeBtn = this.sideButton(1480, 380, 170, 58, '再來啊！', 0x5a2020, 0xc4583f, () => {
+      if (this.animator.playing || this._concluded) return;
+      this.challengeNextWave();
+    });
+    this.setSideButtonVisible(this.challengeBtn, false);
+
     // 右側操作按鈕：結束回合（免開沙盒）、隨時檢視本局牌組
     this.endTurnBtn = this.sideButton(1480, 460, 170, 62, '結束回合', 0x5a4520, 0xd9b45c, () => {
       if (this.animator.playing || this._concluded) return;
@@ -252,14 +263,23 @@ export class BattleScene extends Phaser.Scene {
       .setStrokeStyle(3, border)
       .setDepth(5002)
       .setInteractive({ useHandCursor: true });
-    this.add
+    const txt = this.add
       .text(x, y, label, { fontFamily: 'sans-serif', fontSize: '20px', color: '#f5e6c8', fontStyle: 'bold' })
       .setOrigin(0.5)
       .setDepth(5003);
     rect.on('pointerover', () => rect.setStrokeStyle(4, 0xffe1b0));
     rect.on('pointerout', () => rect.setStrokeStyle(3, border));
     rect.on('pointerdown', onClick);
+    rect.txt = txt;
     return rect;
+  }
+
+  setSideButtonVisible(button, visible) {
+    if (!button) return;
+    button.setVisible(visible);
+    button.txt?.setVisible(visible);
+    if (visible && !button.input?.enabled) button.setInteractive({ useHandCursor: true });
+    if (!visible) button.disableInteractive();
   }
 
   updateHud() {
@@ -333,9 +353,13 @@ export class BattleScene extends Phaser.Scene {
     if (this._concluded) return;
     const tick = this.battle.statusTurnEnd();
     if (tick.hits.length) await this.wait(300 + Math.min(tick.hits.length, 8) * 60);
+    if (tick.clearReward) {
+      this.flash(`清場！下回合內力 ＋${tick.clearReward.energy}、多抽 ${tick.clearReward.draw} 張`, 0xd9b45c);
+    }
 
     const phase = this.battle.enemyPhase();
     this.formationView.sync(this.battle.formation);
+    this.formationView.playSpecialActions(phase.specials);
     if (phase.defeated) this.flash('主角倒下！', 0xc4583f);
     await this.wait(360);
 
@@ -367,12 +391,20 @@ export class BattleScene extends Phaser.Scene {
     this.handView.destroyCard(uid);
 
     if (r.result.effect.energy) this.flash(`內力 ＋${r.result.effect.energy}`, 0x5aa06a);
+    if (r.result.clearReward) {
+      this.flash(`清場！內力 ＋${r.result.clearReward.energy}、抽 ${r.result.clearReward.draw} 張`, 0xd9b45c);
+    }
 
     if (r.result.transcript) this.runTranscript(r.result.transcript);
     else this.handView.relayout(true);
 
     // 這張牌可能砍光了最後一波敵陣
     this.maybeConclude();
+  }
+
+  challengeNextWave() {
+    const rows = this.battle.challengeNextWave();
+    if (rows > 0) this.setSideButtonVisible(this.challengeBtn, false);
   }
 
   formlessMerge(draggedUid, targetUid) {

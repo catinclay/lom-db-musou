@@ -26,7 +26,8 @@
 
 ## 「卡片自身效果」 vs 「附魔」（兩回事，別混）
 
-- **卡片自身狀態效果**：卡定義的 `effectStatus: { id, stacks }`（毒霧的毒、火藥的火）。定額、綁 defId、
+- **卡片自身狀態效果**：卡定義的 `effectStatus: { id, stacks }`（毒霧的毒、火藥的火）。`stacks` 是境界一
+  基礎值；每波層數吃 `realmDamageCurve`（基礎 3 → 3/5/8/12/18），連段增加施放波數。效果綁 defId，
   **不進 enchants、不佔上限、不隨合成轉移**。這兩張已**移除直接傷害**（`base` 無 `damage`），純上狀態。
 - **附魔（enchants）**：**外加**的魔（拉霸/商店/事件/合成而來），實例層資料 `card.enchants = { 狀態id: level }`。
   存的是 **level**（不是層數）；合成時匯總兩張、受**上限** `tuning.enchantCap(realm)`＝2^(境界−1) 約束，
@@ -40,9 +41,13 @@
 
 實際層數由 `BattleState.enchantStacks(def, realm, statusId, level)` 算，三條路（由專到泛）：
 1. 卡自訂 `def.enchantStacks(id, level, ctx)` —— 完全客製。
-2. 附魔與卡自身 `effectStatus` **同種**（如毒霧的毒附魔）：**放大自身效果** ＝ `effectStatus.stacks × level`
-   （疊在 effectStatus 定額之上：level1 ⇒ 共 2 倍、level2 ⇒ 3 倍…），解決「無傷害卡裝不了附魔」。
+2. 附魔與卡自身 `effectStatus` **同種**（如毒霧的毒附魔）：**放大自身效果** ＝
+   `境界縮放後的 statusStacks × level`（附魔本身不吃連段；疊在卡自身效果之上，level1 ⇒ 共 2 倍、
+   level2 ⇒ 3 倍…），解決「無傷害卡裝不了附魔」。
 3. 一般傷害卡：`round(每發基礎傷 × enchantScale × level)`。基礎傷 ＝ `resolveEffect(def, realm, 1).damage`，
    吃**境界**、不吃連段/暫時 buff。`enchantScale` 每卡自訂（貫 0.15 > 橫劈 0.08；單體未來約 0.2），沒寫走 `tuning.combat.enchantScaleDefault`。
 
 卡面左緣彩色小點（`CardSprite.refreshEnchants`）顯示附魔的顏色與 level。
+
+出牌時會先 tick 敵人身上的既有狀態，再套用本張牌的自身狀態與附魔；因此剛施加的層數當次不會立刻衰減
+或成長，敵人頭上會先顯示與卡面一致的完整層數。

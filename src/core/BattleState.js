@@ -61,11 +61,17 @@ export class BattleState {
     // 主角血量：由 RunState 注入（跨戰保存），省略則回退 tuning。
     this.playerMaxHp = bc.maxHp ?? this.tuning.combat.playerMaxHp;
     this.playerHp = bc.hp ?? this.playerMaxHp;
-    // 補充波預算：Infinity ＝ 舊沙盒的無限湧上；有限值到 0 且清場 ＝ 勝。
+    // 一個補充波包含固定排數；成功生成一排才消耗內容，避免場滿時波次空扣。
+    this.reinforcementRowsPerWave = bc.rows ?? this.tuning.combat.rows;
     this.wavesLeft = bc.waves ?? Infinity;
+    this.rowsLeftInWave = this.wavesLeft > 0 ? this.reinforcementRowsPerWave : 0;
+    this.awaitingWaveChoice = false;
+    this.clearRewardClaimed = false;
+    this.pendingClearReward = null;
     this.outcome = 'ongoing';
     this.formation = new Formation(this.tuning.combat.lanes, this.tuning.combat.maxRank, this.rng);
-    this.formation.refill(bc.rows ?? this.tuning.combat.rows, this.enemySpec());
+    this.formation.refill(this.reinforcementRowsPerWave, this.enemySpec());
+    this.formation.planSpecialIntents();
 
     this.runRelicHook('onBattleStart'); // 遺物：戰鬥開場一次性效果（如給敵陣上狀態）
     this.bus.emit(EVENT.BATTLE_STARTED, { state: this });
@@ -94,10 +100,13 @@ export class BattleState {
     const minPerRow = bc.minPerRow ?? c.minPerRow;
     const maxPerRow = bc.maxPerRow ?? c.maxPerRow;
     const eliteChance = bc.eliteChance ?? c.eliteChance;
-    const grunt = bc.gruntDefId ?? 'luo';
-    const elite = bc.eliteDefId ?? 'han';
+    const gruntPool = bc.gruntDefIds ?? (bc.gruntDefId ? [bc.gruntDefId] : c.gruntPool);
+    const elitePool = bc.eliteDefIds ?? (bc.eliteDefId ? [bc.eliteDefId] : c.elitePool);
     return {
-      defId: () => (this.rng() < eliteChance ? elite : grunt),
+      defId: () => {
+        const pool = this.rng() < eliteChance ? elitePool : gruntPool;
+        return pool[Math.floor(this.rng() * pool.length)];
+      },
       count: () => minPerRow + Math.floor(this.rng() * (maxPerRow - minPerRow + 1)),
     };
   }
@@ -112,7 +121,7 @@ export class BattleState {
     if (this.playerHp <= 0) {
       this.outcome = 'lost';
       this.bus.emit(EVENT.BATTLE_LOST, { state: this });
-    } else if (this.formation.isEmpty && this.wavesLeft <= 0) {
+    } else if (this.formation.isEmpty && !this.hasReinforcements) {
       this.outcome = 'won';
       this.bus.emit(EVENT.BATTLE_WON, { state: this });
     }
@@ -121,8 +130,10 @@ export class BattleState {
 
   /** @returns transcript */
   startTurn() {
+    const pendingClearReward = this.pendingClearReward;
+    this.pendingClearReward = null;
     this.turn += 1;
-    this.energy = this.tuning.energyPerTurn + this.relicMod('energy'); // 遺物：內力加成
+    this.energy = this.tuning.energyPerTurn + this.relicMod('energy') + (pendingClearReward?.energy ?? 0); // 遺物／清場加成
     this.damageThisTurn = 0;
     this.mergesThisTurn = 0;
     this.armor = 0; // 護甲是「格擋」，每回合重置（敵人上回合結束已結算過）
@@ -130,7 +141,7 @@ export class BattleState {
 
     // 先把該抽的牌一次抽完，再一口氣解算合成 ——
     // 不是抽一張算一次，否則玩家看不出「這批牌湊出了什麼」。
-    const handSize = this.tuning.startingHandSize + this.relicMod('handSize'); // 遺物：起手張數
+    const handSize = this.tuning.startingHandSize + this.relicMod('handSize') + (pendingClearReward?.draw ?? 0);
     const transcript = this.drawCards(handSize);
     transcript.push(...resolveAutoMerges(this, this.tuning));
 
@@ -156,35 +167,57 @@ export class BattleState {
     return transcript.concat(this.startTurn());
   }
 
-  /**
-   * 割草手感：整片敵陣被清空、但還有補充波時，**當下**就把下一波湧上 ——
-   * 不必等回合結束，玩家才不會清完場還杵著滿手內力與手牌卻沒得打。
-   * 新一波從後方補進（非接觸位、未備戰），所以不會馬上攻擊主角。
-   * @returns 是否真的補了一波
-   */
-  maybeRushNextWave() {
-    if (this.outcome !== 'ongoing') return false;
-    if (!this.formation.isEmpty || this.wavesLeft <= 0) return false;
-    this.formation.refill(this.battleConfig.rows ?? this.tuning.combat.rows, this.enemySpec());
-    this.wavesLeft -= 1;
-    this.bus.emit(EVENT.ENEMIES_ADVANCED, { formation: this.formation, rushIn: true });
-    return true;
+  get hasReinforcements() {
+    return this.wavesLeft === Infinity || this.wavesLeft > 0;
   }
 
-  /**
-   * 敵人相位（玩家按下結束回合時，跑手牌 endTurn 之前呼叫）：
-   *   1. 已備戰的接觸敵人攻擊主角（護甲先擋）。
-   *   2. 前進補位（advance）—— 被卡住的會側移到隔壁一路補位。
-   *   3. 從後方補排湧上。
-   *   4. 新到接觸位的敵人進入備戰（telegraph），下回合才攻擊。
-   *
-   * 攻擊在前進之前結算，所以「這回合剛到最前排」的敵人不會馬上打人，只會亮起備戰。
-   *
-   * @returns { contactDamage, blocked, hpDamage, playerHp, defeated }
-   */
+  /** 成功送進指定排數才消耗波次內容；場地塞滿時不會空扣。 */
+  spawnReinforcementRows(maxRows = 1) {
+    let rowsAdded = 0;
+    while (rowsAdded < maxRows && this.hasReinforcements) {
+      if (!this.formation.addBackRow(this.enemySpec())) break;
+      rowsAdded += 1;
+      this.rowsLeftInWave -= 1;
+      if (this.rowsLeftInWave <= 0) {
+        if (this.wavesLeft !== Infinity) this.wavesLeft -= 1;
+        this.rowsLeftInWave = this.hasReinforcements ? this.reinforcementRowsPerWave : 0;
+      }
+    }
+    if (rowsAdded > 0) {
+      this.awaitingWaveChoice = false;
+      this.clearRewardClaimed = false;
+    }
+    return rowsAdded;
+  }
+
+  /** 清場後叫陣：把當前補充波尚未進場的排數一次送進來。 */
+  challengeNextWave() {
+    if (this.outcome !== 'ongoing' || !this.awaitingWaveChoice || !this.formation.isEmpty || !this.hasReinforcements) return 0;
+    const rowsAdded = this.spawnReinforcementRows(this.rowsLeftInWave);
+    if (rowsAdded > 0) {
+      this.formation.planSpecialIntents();
+      this.bus.emit(EVENT.ENEMIES_ADVANCED, { formation: this.formation, challenge: true, rowsAdded });
+    }
+    return rowsAdded;
+  }
+
+  /** 玩家出牌清空敵陣時，送內力與抽牌一次，接著等待叫陣或正常結束回合。 */
+  rewardClearIfNeeded() {
+    if (!this.formation.isEmpty || !this.hasReinforcements || this.clearRewardClaimed) return null;
+    const reward = this.tuning.combat.clearReward;
+    this.clearRewardClaimed = true;
+    this.awaitingWaveChoice = true;
+    this.energy += reward.energy;
+    const transcript = this.drawCards(reward.draw);
+    transcript.push(...resolveAutoMerges(this, this.tuning));
+    return { energy: reward.energy, draw: reward.draw, transcript };
+  }
+
+  /** 敵人相位：攻擊 → 準備倒數／特殊行動 → 前進繞道 → 正常補一排 → 規劃下回合意圖。 */
   enemyPhase() {
-    // 1. 備戰的接觸敵人攻擊
-    const contactDamage = this.formation.contactDamage();
+    this.formation.tickSpecialCooldowns();
+    const attackers = this.formation.consumeContactAttacks();
+    const contactDamage = attackers.reduce((sum, e) => sum + e.damage, 0);
     const blocked = Math.min(this.armor, contactDamage);
     this.armor -= blocked;
     const hpDamage = contactDamage - blocked;
@@ -193,14 +226,17 @@ export class BattleState {
       this.bus.emit(EVENT.PLAYER_HIT, { damage: hpDamage, blocked, hp: this.playerHp });
     }
 
-    // 2. 前進補位　3. 補排湧上（只在還有補充波時）　4. 新到最前排的進入備戰
-    this.formation.advance();
-    if (this.wavesLeft > 0) {
-      this.formation.refill(this.battleConfig.rows ?? this.tuning.combat.rows, this.enemySpec());
-      this.wavesLeft -= 1;
-    }
-    this.formation.prepareFront();
-    this.bus.emit(EVENT.ENEMIES_ADVANCED, { formation: this.formation });
+    this.formation.progressContactPreparation(new Set(attackers.map((e) => e.uid)));
+    const specials = this.formation.resolveSpecialActions();
+    this.formation.advance({ stay: specials.stayed });
+    const rowsAdded = this.spawnReinforcementRows(1);
+    this.formation.initializeContactPreparation();
+    this.formation.planSpecialIntents();
+    this.bus.emit(EVENT.ENEMIES_ADVANCED, {
+      formation: this.formation,
+      rowsAdded,
+      specials: specials.resolved,
+    });
 
     this.checkOutcome();
     return {
@@ -210,6 +246,9 @@ export class BattleState {
       playerHp: this.playerHp,
       defeated: this.playerHp <= 0,
       outcome: this.outcome,
+      attackers: attackers.map((e) => e.uid),
+      rowsAdded,
+      specials: specials.resolved,
     };
   }
 
@@ -271,15 +310,6 @@ export class BattleState {
 
       this.bus.emit(EVENT.DAMAGE_DEALT, result);
       this.bus.emit(EVENT.ENEMIES_HIT, { ...combat, combo, knockback: result.knockback });
-
-      // 卡片「自身」的狀態效果（毒霧的毒、火藥的火）：定額，命中即上
-      if (def.effectStatus) {
-        this.applyStatusToHits(combat.hits, def.effectStatus.id, def.effectStatus.stacks);
-      }
-      // 附魔（外加）：層數由 enchantStacks 算（傷害卡按傷害縮放；無傷害卡走客製效果）。
-      for (const [id, level] of cardEnchants(card)) {
-        this.applyStatusToHits(combat.hits, id, this.enchantStacks(def, card.realm, id, level));
-      }
     }
     if (effect.totalArmor > 0) {
       this.armor += effect.totalArmor;
@@ -299,11 +329,32 @@ export class BattleState {
     this.bus.emit(EVENT.ENERGY_CHANGED, { energy: this.energy });
     this.bus.emit(EVENT.COMBO_CHANGED, combo);
 
-    // 出牌＝流逝一格時間：異常狀態跳一次小 tick（中毒滴傷、燃燒疊層）
+    // 出牌＝流逝一格時間：先推進敵人身上的既有狀態。
+    // 本張牌命中後新增的狀態在下方才套用，因此首次 tick 會延到下一次出牌。
     this.statusTick('play');
 
-    // 清空整片但還有補充波 ⇒ 下一波立刻湧上（割草手感）
-    this.maybeRushNextWave();
+    if (result.combat) {
+      // 卡片「自身」的狀態效果（毒霧的毒、火藥的火）：吃境界與連段縮放後，對每個命中者上一次。
+      if (def.effectStatus) {
+        this.applyStatusToHits(result.combat.hits, def.effectStatus.id, effect.statusStacks, { perWave: true });
+      }
+      // 附魔（外加）：層數由 enchantStacks 算（傷害卡按傷害縮放；無傷害卡走客製效果）。
+      for (const [id, level] of cardEnchants(card)) {
+        this.applyStatusToHits(
+          result.combat.hits,
+          id,
+          this.enchantStacks(def, card.realm, id, level),
+          { perWave: Boolean(def.effectStatus) }
+        );
+      }
+    }
+
+    const clearReward = this.rewardClearIfNeeded();
+    if (clearReward) {
+      result.clearReward = { energy: clearReward.energy, draw: clearReward.draw };
+      result.transcript = [...(result.transcript ?? []), ...clearReward.transcript];
+      this.bus.emit(EVENT.ENERGY_CHANGED, { energy: this.energy });
+    }
     // 這張牌可能清空了最後一波敵陣（且無補充波）⇒ 判勝
     this.checkOutcome();
     return { ok: true, result };
@@ -312,27 +363,28 @@ export class BattleState {
   /**
    * 一個附魔（statusId、level）套到敵人身上是幾層。三條路（由專到泛）：
    *   1. 卡自訂 `def.enchantStacks(id, level, ctx)` —— 完全客製。
-   *   2. 附魔與卡「自身狀態效果」同種（如毒霧的毒附魔）：放大自身效果 ＝ effectStatus.stacks × level
-   *      （疊在 effectStatus 的定額之上：level 1 ⇒ 總共 2 倍、level 2 ⇒ 3 倍…）。
+   *   2. 附魔與卡「自身狀態效果」同種（如毒霧的毒附魔）：放大境界縮放後的自身效果 × level
+   *      （疊在 effectStatus 之上：level 1 ⇒ 總共 2 倍、level 2 ⇒ 3 倍…）。
    *   3. 一般傷害卡：round(每發基礎傷 × enchantScale × level)。無傷害又無上述客製 ⇒ 0。
    */
   enchantStacks(def, realm, statusId, level) {
     if (def.enchantStacks) return def.enchantStacks(statusId, level, { def, realm });
     if (def.effectStatus && def.effectStatus.id === statusId) {
-      return def.effectStatus.stacks * level;
+      return resolveEffect(def, realm, 1).statusStacks * level;
     }
     const baseDmg = resolveEffect(def, realm, 1).damage ?? 0;
     const scale = def.enchantScale ?? this.tuning.combat.enchantScaleDefault;
     return Math.round(baseDmg * scale * level);
   }
 
-  /** 對命中且存活的敵人各上 stacks 層某狀態（連段多波打到同一人只上一次）。 */
-  applyStatusToHits(hits, id, stacks) {
+  /** 對命中且存活的敵人上狀態；純狀態卡每波各套一次，一般附魔整張牌仍只套一次。 */
+  applyStatusToHits(hits, id, stacks, { perWave = false } = {}) {
     if (stacks <= 0) return;
     const seen = new Set();
     for (const h of hits) {
-      if (h.killed || seen.has(h.uid)) continue;
-      seen.add(h.uid);
+      const key = perWave ? `${h.wave ?? 0}:${h.uid}` : h.uid;
+      if (h.killed || seen.has(key)) continue;
+      seen.add(key);
       const e = this.formation.findByUid(h.uid);
       if (e?.alive) applyStatus(e, id, stacks);
     }
@@ -353,7 +405,16 @@ export class BattleState {
 
   /** 回合結束大 tick（場景在敵人前進之前呼叫，讓 DoT 先收割）。 */
   statusTurnEnd() {
-    return this.statusTick('turnEnd');
+    const result = this.statusTick('turnEnd');
+    // DoT 可能在玩家已按下「結束回合」後才清場。此時已無法選擇叫陣，
+    // 所以仍照正常敵方相位只補一排，獎勵則延到下一個玩家回合，避免抽到的牌立刻被棄掉。
+    if (this.formation.isEmpty && this.hasReinforcements && !this.clearRewardClaimed) {
+      const reward = this.tuning.combat.clearReward;
+      this.clearRewardClaimed = true;
+      this.pendingClearReward = { energy: reward.energy, draw: reward.draw };
+      result.clearReward = { ...this.pendingClearReward, deferred: true };
+    }
+    return result;
   }
 
   /** 玩家拉箭頭把 dragged 併進 target。@returns transcript 或 null（配對不合法） */

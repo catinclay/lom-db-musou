@@ -10,10 +10,11 @@
  * 所以境界與連段各是一個可抽換的函式，而不是寫死的乘法。
  * 未指定時走預設（境界加每發傷害／護甲、連段加發數），攻擊牌大多不必寫。
  *
- * 效果的形狀：{ hits, damage?, armor? }
+ * 效果的形狀：{ hits, damage?, armor?, statusId?, statusStacks? }
  *   hits   打幾發（暗器 3 發，劈 1 發）
  *   damage 每發傷害
  *   armor  每發護甲
+ *   statusStacks 卡片每次施加的狀態層數（只吃境界曲線；連段增加施放次數）
  * 總量 = hits × 每發
  */
 
@@ -64,12 +65,20 @@ export function resolveEffect(def, realm, multiplier = 1) {
   const afterCombo = (def.comboScale ?? defaultComboScale)(afterRealm, multiplier);
 
   const hits = afterCombo.hits ?? 1;
-  return {
+  const result = {
     ...afterCombo,
     hits,
     totalDamage: (afterCombo.damage ?? 0) * hits,
     totalArmor: (afterCombo.armor ?? 0) * hits,
   };
+  // 卡片自身的每次狀態層數與攻擊卡每發傷害吃同一條境界曲線；
+  // 連段走 hits 變成多次獨立施放，每波各套一次這個層數。
+  if (def.effectStatus) {
+    const realmScaled = Math.round(def.effectStatus.stacks * realmMultiplier(realm));
+    result.statusId = def.effectStatus.id;
+    result.statusStacks = realmScaled;
+  }
+  return result;
 }
 
 /**
@@ -99,7 +108,7 @@ export function cardFaceValue(def, realm) {
   // 純狀態卡（毒霧/火藥）無傷害數值，改標它自身效果的狀態與層數
   if (def.effectStatus) {
     const s = STATUS_DEFS[def.effectStatus.id];
-    return { isDamage: false, tag: s?.short ?? '狀', text: `${def.effectStatus.stacks}` };
+    return { isDamage: false, tag: s?.short ?? '狀', text: `${e.statusStacks}` };
   }
   return null;
 }

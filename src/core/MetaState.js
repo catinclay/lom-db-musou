@@ -2,7 +2,7 @@ import { TUNING } from '../config/tuning.js';
 
 /**
  * 跨 run 的「門派據點」永久狀態（Phase 5，rogue-lite meta）。零 Phaser、純資料，可測。
- * 持久化（localStorage）是渲染層的事 —— 見 ui/metaStore.js；這裡只認 { prestige, levels }。
+ * 持久化（localStorage）是渲染層的事 —— 見 ui/metaStore.js；這裡只認 { prestige, levels, stats }。
  *
  * 威望（prestige）：一局結束依「撐到第幾天 ＋ 通關獎勵」賺取，回據點花在永久升級。
  * 升級（upgrades）：買了就永久 +級，`applyToRun` 在**每局 RunState 建構時**把加成疊上去
@@ -71,9 +71,14 @@ export function getUpgrade(id) {
 }
 
 export class MetaState {
-  constructor({ prestige = 0, levels = {} } = {}) {
+  constructor({ prestige = 0, levels = {}, stats = {} } = {}) {
     this.prestige = prestige;
     this.levels = { ...levels };
+    this.stats = {
+      runs: stats.runs ?? 0,
+      wins: stats.wins ?? 0,
+      bestDay: stats.bestDay ?? 0,
+    };
   }
 
   level(id) {
@@ -106,6 +111,9 @@ export class MetaState {
     const m = tuning.run.meta;
     const gained = run.day * m.prestigePerDay + (run.outcome === 'won' ? m.winBonus : 0);
     this.prestige += gained;
+    this.stats.runs += 1;
+    if (run.outcome === 'won') this.stats.wins += 1;
+    this.stats.bestDay = Math.max(this.stats.bestDay, run.day);
     return gained;
   }
 
@@ -118,6 +126,6 @@ export class MetaState {
   }
 
   toJSON() {
-    return { prestige: this.prestige, levels: { ...this.levels } };
+    return { prestige: this.prestige, levels: { ...this.levels }, stats: { ...this.stats } };
   }
 }

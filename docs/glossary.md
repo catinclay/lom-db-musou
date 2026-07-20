@@ -11,7 +11,7 @@
 | **連段（combo）** | 依境界由小到大遞增出牌累積的 step。攻擊牌加「次數」、功能牌加法 `+(step−1)`。見 [systems/combo.md](systems/combo.md)。 |
 | **合成 / merge** | 同名同境界自動合成（結果境界 +1）。見 [systems/merge.md](systems/merge.md)。 |
 | **忘形催化劑（wangXing）** | realmless 的特殊卡（或帶忘形 tag 的卡當材料）：**跨境界、跨名**把對方 +1、附魔倒進對方、自己被消耗。 |
-| **附魔（enchants）vs 卡自身 effectStatus** | 附魔＝外加的魔（`card.enchants = { 狀態id: level }`，隨合成轉移、受上限）；effectStatus＝卡定義的定額狀態（毒霧的毒/火藥的火，綁 defId、不轉移）。見 [systems/merge.md](systems/merge.md)。 |
+| **附魔（enchants）vs 卡自身 effectStatus** | 附魔＝外加的魔（`card.enchants = { 狀態id: level }`，隨合成轉移、受上限）；effectStatus＝卡定義的自身狀態（毒霧的毒/火藥的火，層數吃境界、連段加施放次數，綁 defId、不轉移）。見 [systems/merge.md](systems/merge.md)。 |
 | **DoT / 異常狀態** | 中毒（即時流血＋比例衰減）、燃燒（蓄力引爆）。靠出牌小 tick＋回合結束大 tick 發作。見 [systems/status.md](systems/status.md)。 |
 | **割草敵陣（Formation）** | `lanes`×`maxRank` 格狀敵陣，肩後視角湧上。招式用 `TARGET`（ROW/LANE/BLAST/SCATTER…）鎖定。見 [systems/combat.md](systems/combat.md)。 |
 | **run / RunState** | 「一局江湖遠征」的狀態機：牌組/血量/銀兩/屬性/遺物跨戰保存，白天三選一、入夜尾王。在 BattleState 之上、MetaState 之下。見 [systems/run.md](systems/run.md)。 |

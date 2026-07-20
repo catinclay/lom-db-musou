@@ -20,7 +20,7 @@ function nextUid() {
 
 /**
  * 兩份附魔相加：同一種魔 level 相加、不同種魔並存。永遠回傳新物件（不就地改寫）。
- * （enchants 存的是 level，不是層數；實際層數在出牌時由傷害動態算 —— 見 BattleState.playCard）
+ * （enchants 存的是 level，不是層數；實際層數在出牌時依卡效果動態算 —— 見 BattleState.playCard）
  */
 export function mergeEnchants(a = {}, b = {}) {
   const out = { ...a };

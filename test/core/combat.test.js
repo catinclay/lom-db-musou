@@ -119,6 +119,17 @@ describe('BLAST 火藥（3×3）', () => {
     expect(hits.map((h) => h.uid)).toContain('e0'); // 一定含最近排
     expect(hits).toHaveLength(1); // 左側方塊只涵蓋到它
   });
+
+  it('連段每波使用不同 3×3 格位，後續仍優先挑有敵人的位置', () => {
+    const f = new Formation(7, 6);
+    f.addRow(0, 'han', 3);
+    f.addRow(1, 'han', 3);
+    f.addRow(2, 'han', 3);
+    const { hits, areas } = resolveAttack(eff({ hits: 3, damage: 0 }), TARGET.BLAST, f, () => 0, 0, { size: 3 });
+    expect(areas).toHaveLength(3);
+    expect(new Set(areas.map((a) => a.key)).size).toBe(3);
+    expect([0, 1, 2].every((wave) => hits.some((h) => h.wave === wave))).toBe(true);
+  });
 });
 
 describe('MULTI 多發暗器', () => {

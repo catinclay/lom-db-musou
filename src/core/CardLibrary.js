@@ -98,7 +98,7 @@ export const CARD_DEFS = {
   /**
    * 毒霧 —— 純上「中毒」。**無直接傷害**（見 base 無 damage）。
    * effectStatus 是這張卡「自身的效果」（非附魔）：命中最近三排的敵人各上 stacks 層毒，
-   *   定額、不隨傷害縮放、不佔附魔上限、不隨合成轉移（套用點在 BattleState.playCard）。
+   *   每次層數隨境界曲線成長，連段 step 讓它獨立施放多次；不佔附魔上限、不隨合成轉移。
    * rows：NEAR_ROWS 打最近幾排（見 combat.js）。
    */
   duWu: {
@@ -115,7 +115,7 @@ export const CARD_DEFS = {
 
   /**
    * 火藥 —— 純上「燃燒」。**無直接傷害**。
-   * effectStatus：命中 3×3 範圍的敵人各上 stacks 層火（定額，同毒霧的效果性質）。
+   * effectStatus：命中 3×3 範圍的敵人各上 stacks 層火；境界加每次層數，連段增加獨立爆炸次數。
    * blast：BLAST 方塊邊長（見 combat.js）。
    */
   huoYao: {

@@ -289,14 +289,24 @@ describe('功能牌（技能）', () => {
 });
 
 describe('敵人相位', () => {
-  it('敵人剛到最前排先備戰，不會馬上攻擊；下回合才挨打', () => {
-    const b = battle(deckOf(['guan']), { startingHandSize: 0 });
-    b.start(); // 敵人在 rank 1〜4
+  it('嘍囉進線黃2 → 黃1 → 紅，下個敵人相位才攻擊', () => {
+    const b = new BattleState({
+      deckList: deckOf(['guan']), rng: seededRng(1), tuning: TUNING,
+      battle: { waves: 0, rows: 1, minPerRow: 1, maxPerRow: 1, eliteChance: 0, gruntDefId: 'luo' },
+    });
+    b.start(); // 敵人在 rank 1
     const hp0 = b.playerHp;
-    b.enemyPhase(); // 前排前進到接觸位、亮起備戰
-    expect(b.playerHp).toBe(hp0); // 這回合還沒挨打
-    b.enemyPhase(); // 備戰過了，這回合才攻擊
+    const e = b.formation.frontLivingEnemy();
+    b.enemyPhase();
+    expect(e).toMatchObject({ rank: 0, attackState: 'charging', prepareRemaining: 2 });
+    b.enemyPhase();
+    expect(e).toMatchObject({ attackState: 'charging', prepareRemaining: 1 });
+    b.enemyPhase();
+    expect(e.attackState).toBe('ready');
+    expect(b.playerHp).toBe(hp0);
+    b.enemyPhase();
     expect(b.playerHp).toBeLessThan(hp0);
+    expect(e).toMatchObject({ attackState: 'charging', prepareRemaining: 2 });
   });
 
   it('崩山出牌會把命中的敵人往後震退（result.knockback）', () => {
@@ -364,12 +374,14 @@ describe('有限戰鬥（勝負判定）', () => {
   });
 
   it('主角血量歸零 ⇒ 判負並發 BATTLE_LOST', () => {
-    const b = withBattle({ hp: 1, waves: 9 });
+    const b = withBattle({ hp: 1, waves: 0, rows: 1, minPerRow: 1, maxPerRow: 1, eliteChance: 0, gruntDefId: 'luo' });
     let lost = false;
     b.bus.on(EVENT.BATTLE_LOST, () => (lost = true));
     b.start();
-    b.enemyPhase(); // 前排前進到接觸位、亮起備戰
-    b.enemyPhase(); // 備戰過了 → 攻擊，1 滴血扛不住
+    b.enemyPhase(); // 進線，黃2
+    b.enemyPhase(); // 黃1
+    b.enemyPhase(); // 紅
+    b.enemyPhase(); // 攻擊
     expect(b.playerHp).toBe(0);
     expect(b.outcome).toBe('lost');
     expect(lost).toBe(true);
@@ -384,22 +396,80 @@ describe('有限戰鬥（勝負判定）', () => {
     expect(b.wavesLeft).toBe(Infinity);
   });
 
-  it('清場但還有補充波 ⇒ 下一波當下湧上（不必等回合結束），wavesLeft −1', () => {
-    const b = withBattle({ waves: 2 });
+  it('清場獎勵只領一次：內力 +1、抽一張，並等待玩家選擇', () => {
+    const b = withBattle({ waves: 2, rows: 3, minPerRow: 1, maxPerRow: 1 });
     b.start();
     for (const e of b.formation.living) e.alive = false;
-    expect(b.maybeRushNextWave()).toBe(true);
-    expect(b.formation.isEmpty).toBe(false); // 新一波已湧上
-    expect(b.wavesLeft).toBe(1);
-    b.checkOutcome();
-    expect(b.outcome).toBe('ongoing'); // 還有敵人、還沒判勝
+    const energy = b.energy;
+    const reward = b.rewardClearIfNeeded();
+    expect(reward).toMatchObject({ energy: 1, draw: 1 });
+    expect(b.energy).toBe(energy + 1);
+    expect(b.awaitingWaveChoice).toBe(true);
+    expect(b.rewardClearIfNeeded()).toBeNull();
   });
 
-  it('清場且補充波用盡 ⇒ 不補、判勝', () => {
+  it('「再來啊」把當前波剩餘排數一次送進，完整消耗一波', () => {
+    const b = withBattle({ waves: 2, rows: 3, minPerRow: 1, maxPerRow: 1 });
+    b.start();
+    for (const e of b.formation.living) e.alive = false;
+    b.rewardClearIfNeeded();
+    expect(b.challengeNextWave()).toBe(3);
+    expect(b.formation.occupiedRankCount()).toBe(3);
+    expect(b.wavesLeft).toBe(1);
+    expect(b.rowsLeftInWave).toBe(3);
+    expect(b.awaitingWaveChoice).toBe(false);
+  });
+
+  it('正常結束回合只補一排，送滿本波所有排後才讓 wavesLeft −1', () => {
+    const b = withBattle({ waves: 2, rows: 3, minPerRow: 1, maxPerRow: 1 });
+    b.start();
+    for (const e of b.formation.living) e.alive = false;
+    b.enemyPhase();
+    expect(b.formation.occupiedRankCount()).toBe(1);
+    expect(b.wavesLeft).toBe(2);
+    expect(b.rowsLeftInWave).toBe(2);
+    b.enemyPhase();
+    b.enemyPhase();
+    expect(b.wavesLeft).toBe(1);
+    expect(b.rowsLeftInWave).toBe(3);
+  });
+
+  it('回合結束 DoT 才清場時，正常補一排，清場內力與抽牌延到下回合', () => {
+    const b = new BattleState({
+      deckList: deckOf(Array(20).fill('hengPi')),
+      rng: seededRng(1),
+      tuning: { ...TUNING, mergeDraw: { baseChance: 0, decayPerMerge: 0, minChance: 0 } },
+      battle: { waves: 2, rows: 3, minPerRow: 1, maxPerRow: 1 },
+    });
+    b.start();
+    for (const e of b.formation.living) e.alive = false;
+
+    const tick = b.statusTurnEnd();
+    expect(tick.clearReward).toMatchObject({ energy: 1, draw: 1, deferred: true });
+    expect(b.awaitingWaveChoice).toBe(false);
+
+    b.enemyPhase();
+    expect(b.formation.occupiedRankCount()).toBe(1);
+    const transcript = b.endTurn();
+    expect(b.energy).toBe(TUNING.energyPerTurn + 1);
+    expect(transcript.filter((step) => step.type === TX.DRAW)).toHaveLength(TUNING.startingHandSize + 1);
+  });
+
+  it('場地無法生成新排時不會空扣補充波內容', () => {
+    const b = withBattle({ waves: 2, rows: 1, minPerRow: 1, maxPerRow: 1 });
+    b.start();
+    b.formation.enemies = [];
+    for (let rank = 0; rank <= b.formation.maxRank; rank++) b.formation.addRow(rank, 'luo', 1);
+    expect(b.spawnReinforcementRows(1)).toBe(0);
+    expect(b.wavesLeft).toBe(2);
+    expect(b.rowsLeftInWave).toBe(1);
+  });
+
+  it('清場且補充波用盡 ⇒ 直接判勝、不給清場獎勵', () => {
     const b = withBattle({ waves: 0 });
     b.start();
     for (const e of b.formation.living) e.alive = false;
-    expect(b.maybeRushNextWave()).toBe(false);
+    expect(b.rewardClearIfNeeded()).toBeNull();
     b.checkOutcome();
     expect(b.outcome).toBe('won');
   });

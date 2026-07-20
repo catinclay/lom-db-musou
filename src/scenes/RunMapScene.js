@@ -46,8 +46,9 @@ export class RunMapScene extends Phaser.Scene {
       .text(800, 216, '', { fontFamily: 'sans-serif', fontSize: '16px', color: '#c9a8e0' })
       .setOrigin(0.5);
 
-    // 入夜決戰按鈕
+    // 入夜決戰按鈕（文字由 renderHud 依尾王類別填上，這裡記住它的 text 物件）
     this.bossBtn = this.makeButton(800, 800, 420, 76, '', 0x5a2020, 0xc4583f, () => this.goBoss());
+    this.bossTxt = this.bossBtn.txt;
 
     // 隨時檢視本局牌組
     this.makeButton(200, 60, 210, 56, '檢視牌組', 0x2c4a30, 0x5aa06a,
@@ -169,10 +170,10 @@ export class RunMapScene extends Phaser.Scene {
     const txt = this.add
       .text(x, y, label, { fontFamily: 'sans-serif', fontSize: '24px', color: '#f5e6c8', fontStyle: 'bold' })
       .setOrigin(0.5);
-    this.bossTxt = txt;
     rect.on('pointerover', () => rect.setStrokeStyle(4, 0xffe1b0));
     rect.on('pointerout', () => rect.setStrokeStyle(3, border));
     rect.on('pointerdown', onClick);
+    rect.txt = txt;
     return rect;
   }
 

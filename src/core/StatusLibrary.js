@@ -14,10 +14,10 @@ export const STATUS = {
 };
 
 export const STATUS_DEFS = {
-  burn: { id: 'burn', name: '燃燒', short: '燒', color: 0xff7a3c },
-  poison: { id: 'poison', name: '中毒', short: '毒', color: 0x8fd06a },
-  armorBreak: { id: 'armorBreak', name: '破甲', short: '甲', color: 0xd9b45c },
-  paralyze: { id: 'paralyze', name: '麻痺', short: '痺', color: 0x9fd0e8 },
+  burn: { id: 'burn', name: '燃燒', short: '燒', color: 0xff7a3c, desc: '出牌時成長，回合結束依層數引爆。' },
+  poison: { id: 'poison', name: '中毒', short: '毒', color: 0x8fd06a, desc: '出牌與回合結束時造成傷害並逐步衰減。' },
+  armorBreak: { id: 'armorBreak', name: '破甲', short: '甲', color: 0xd9b45c, desc: '尚未實裝實際效果。' },
+  paralyze: { id: 'paralyze', name: '麻痺', short: '痺', color: 0x9fd0e8, desc: '尚未實裝實際效果。' },
 };
 
 export const STATUS_IDS = Object.keys(STATUS_DEFS);

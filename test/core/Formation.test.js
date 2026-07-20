@@ -61,21 +61,32 @@ describe('前進補位（不乖乖排隊）', () => {
 });
 
 describe('攻擊準備（telegraph）與接觸傷害', () => {
-  it('剛到接觸位還沒備戰 ⇒ 不計傷；prepareFront 後才計', () => {
+  it('嘍囉進攻擊線後依序顯示黃2、黃1、紅，下一回合才攻擊', () => {
     const f = new Formation(7);
-    f.addRow(0, 'luo', 3); // 3 人在接觸位，尚未備戰
+    const e = put(f, 0, 3);
+    f.initializeContactPreparation();
+    expect(e).toMatchObject({ attackState: 'charging', prepareRemaining: 2 });
     expect(f.contactDamage()).toBe(0);
-    f.prepareFront();
-    expect(f.contactDamage()).toBe(15); // 3 × 5
+    f.progressContactPreparation();
+    expect(e).toMatchObject({ attackState: 'charging', prepareRemaining: 1 });
+    f.progressContactPreparation();
+    expect(e.attackState).toBe('ready');
+    expect(f.contactDamage()).toBe(5);
+    expect(f.consumeContactAttacks().map((x) => x.uid)).toEqual([e.uid]);
+    expect(e).toMatchObject({ attackState: 'charging', prepareRemaining: 2 });
   });
 
-  it('prepareFront 只讓接觸位（rank 0）備戰，其他清掉', () => {
+  it('準備期間被推出攻擊線會清空，重新進入時從完整回合開始', () => {
     const f = new Formation(7);
     const front = put(f, 0, 3);
-    const back = put(f, 1, 3);
-    f.prepareFront();
-    expect(front.prepared).toBe(true);
-    expect(back.prepared).toBe(false);
+    f.initializeContactPreparation();
+    f.progressContactPreparation();
+    expect(front.prepareRemaining).toBe(1);
+    f.knockback(front, 1);
+    expect(front).toMatchObject({ rank: 1, attackState: 'none', prepareRemaining: 0 });
+    front.rank = 0;
+    f.initializeContactPreparation();
+    expect(front).toMatchObject({ attackState: 'charging', prepareRemaining: 2 });
   });
 });
 
@@ -109,6 +120,63 @@ describe('擊退', () => {
     put(f, 2, 0);
     expect(f.knockback(front, 1)).toBe(false);
     expect(front.rank).toBe(0); // 沒動
+  });
+
+  it('不動每層抵銷一次直接擊退並消耗', () => {
+    const f = new Formation(3, 6);
+    const fixed = put(f, 0, 1, 'dingZhuang');
+    expect(fixed.buffs.immovable).toBe(1);
+    expect(f.knockback(fixed, 1)).toBe(false);
+    expect(fixed.rank).toBe(0);
+    expect(fixed.buffs.immovable).toBe(0);
+    expect(f.knockback(fixed, 1)).toBe(true);
+    expect(fixed.rank).toBe(1);
+  });
+
+  it('連鎖推擠撞到不動時，前方敵人有側後空位就斜退一格', () => {
+    const f = new Formation(3, 6);
+    const front = put(f, 0, 1);
+    const fixed = put(f, 1, 1, 'dingZhuang');
+    expect(f.knockback(front, 1)).toBe(true);
+    expect(front).toMatchObject({ rank: 1, lane: 0 });
+    expect(fixed).toMatchObject({ rank: 1, lane: 1 });
+    expect(fixed.buffs.immovable).toBe(0);
+  });
+
+  it('連鎖推擠撞到不動且側後都滿時，整串停止但仍消耗一層', () => {
+    const f = new Formation(3, 6);
+    const front = put(f, 0, 1);
+    put(f, 1, 0);
+    const fixed = put(f, 1, 1, 'dingZhuang');
+    put(f, 1, 2);
+    expect(f.knockback(front, 1)).toBe(false);
+    expect(front.rank).toBe(0);
+    expect(fixed.buffs.immovable).toBe(0);
+  });
+});
+
+describe('距離外特殊行動', () => {
+  it('定樁力士預告扎馬後，下回合不移動並獲得不動', () => {
+    const f = new Formation(3, 6, () => 0);
+    const fixed = put(f, 2, 1, 'dingZhuang');
+    f.planSpecialIntents();
+    expect(fixed.intent).toMatchObject({ id: 'brace', remaining: 1 });
+    const actions = f.resolveSpecialActions();
+    f.advance({ stay: actions.stayed });
+    expect(fixed.rank).toBe(2);
+    expect(fixed.buffs.immovable).toBe(2);
+    expect(actions.resolved[0]).toMatchObject({ uid: fixed.uid, buffId: 'immovable', stacks: 2 });
+  });
+
+  it('前方敵人施放特殊行動不移動，後方敵人仍會繞道', () => {
+    const f = new Formation(3, 6, () => 0);
+    const fixed = put(f, 1, 1, 'dingZhuang');
+    const back = put(f, 2, 1);
+    f.planSpecialIntents();
+    const actions = f.resolveSpecialActions();
+    f.advance({ stay: actions.stayed });
+    expect(fixed).toMatchObject({ rank: 1, lane: 1 });
+    expect(back).toMatchObject({ rank: 1, lane: 0 });
   });
 });
 
@@ -203,10 +271,11 @@ describe('鎖定用的查詢', () => {
   });
 });
 
-describe('debuff placeholder', () => {
-  it('新敵人身上沒有任何狀態、尚未備戰', () => {
+describe('敵人初始狀態', () => {
+  it('嘍囉沒有狀態、buff 或攻擊準備', () => {
     const e = createEnemy('luo', 0, 0);
     expect(e.statuses).toEqual({});
-    expect(e.prepared).toBe(false);
+    expect(e.buffs).toEqual({});
+    expect(e.attackState).toBe('none');
   });
 });

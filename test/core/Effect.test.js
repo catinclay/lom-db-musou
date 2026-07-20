@@ -4,6 +4,7 @@ import { getCardDef } from '../../src/core/CardLibrary.js';
 
 const hengPi = () => getCardDef('hengPi'); // 單發傷害 7，走預設境界曲線
 const anqi = () => getCardDef('anqi');
+const duWu = () => getCardDef('duWu');
 // 護甲牌已從遊戲移除，護甲成長用一個 inline 測試定義來驗（不依賴遊戲牌表）
 const armorCard = { base: { hits: 1, armor: 8 } };
 
@@ -101,6 +102,34 @@ describe('卡面數值', () => {
 
   it('護甲牌標示為非傷害', () => {
     expect(cardFaceValue(armorCard, 2)).toMatchObject({ isDamage: false, tag: '甲', text: '12' });
+  });
+
+  it('純狀態卡顯示境界縮放後層數，不含出牌當下的連段', () => {
+    expect([1, 2, 3, 4, 5].map((realm) => cardFaceValue(duWu(), realm).text)).toEqual([
+      '3',
+      '5',
+      '8',
+      '12',
+      '18',
+    ]);
+  });
+});
+
+describe('純狀態卡：境界加每次層數，連段加施放次數', () => {
+  it('毒霧每次層數吃攻擊卡境界曲線', () => {
+    expect([1, 2, 3, 4, 5].map((realm) => resolveEffect(duWu(), realm, 1).statusStacks)).toEqual([
+      3,
+      5,
+      8,
+      12,
+      18,
+    ]);
+    expect(resolveEffect(duWu(), 5, 1)).toMatchObject({ statusId: 'poison', hits: 1 });
+  });
+
+  it('連段增加獨立施放次數，不改每次層數', () => {
+    expect(resolveEffect(duWu(), 1, 2)).toMatchObject({ statusStacks: 3, hits: 2 });
+    expect(resolveEffect(duWu(), 2, 3)).toMatchObject({ statusStacks: 5, hits: 3 });
   });
 });
 

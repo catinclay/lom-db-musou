@@ -9,7 +9,7 @@
 |------|--------|
 | `src/core/` | 遊戲邏輯：卡牌、合成、連段、牌庫、**敵人/割草戰鬥**、戰鬥狀態機。純 JS，零 Phaser。 |
 | `src/ui/` | 視覺與互動：手牌佈局、卡牌 sprite、動畫、拖曳箭頭、**肩後視角敵陣**、debug 面板。 |
-| `src/scenes/` | Phaser 場景：`BaseScene`（門派據點·開機/局間樞紐）→ `RunMapScene`（白天樞紐）⇄ `BattleScene`（單場戰鬥）⇄ `ShopScene`/`SlotScene`/`EventScene`。 |
+| `src/scenes/` | Phaser 場景：`TitleScene`（主題首頁）→ `BaseScene`（七設施據點）⇄ `FacilityScene`（設施內容）；開始挑戰後進 `RunMapScene`（白天樞紐）⇄ `BattleScene`（單場戰鬥）⇄ `ShopScene`/`SlotScene`/`EventScene`。 |
 | `src/config/` | `tuning.js` — 所有數值。**調手感只該動這裡。** |
 | `test/` | vitest 單元測試，鏡像 `src/` 結構（`test/core/`、`test/ui/`）。 |
 
@@ -31,10 +31,11 @@
 | `core/RelicLibrary.js` | **遺物·秘籍**定義（一局內被動加成）：`onAcquire(run)`（拿到即生效，如 +血量上限）、`battleMods`（每場疊 energy/handSize…）、`hooks`（`onBattleStart`/`onTurnStart`，收 battle 本體）。來源：魔王打贏＋客棧。持有存 `RunState.relics`（只存 id）。 | 新增/改遺物、加新的 hook 時機。 |
 | `core/EventLibrary.js` | **奇遇·江湖事件**定義（白天池 'event' 節點內容）：每個事件一段敘事 ＋ 選項，選項 `resolve(run, rng)` 就地改 run、回 `{ text }`（立即）或 `{ text, battle, battleKind }`（觸發戰鬥）。文案在這、數值在 `tuning.run.event`。首批：野菇/賭坊/仇家堵路/荒廟寶箱/雲遊郎中/高人指點。 | 新增/改奇遇、選項、結果。 |
 | `core/MetaState.js` | **跨 run 門派據點**（Phase 5，rogue-lite meta）：威望（prestige）＋永久升級表（`META_UPGRADES`：底子/內力/家底/絕學/傳家寶）、`earnFromRun`/`buyUpgrade`/`applyToRun`/`toJSON`。純資料零瀏覽器；持久化在 `ui/metaStore.js`。`RunState({ meta })` 建構時 `applyToRun` 疊起始加成。 | 新增/改據點升級、威望公式（`tuning.run.meta`）。 |
-| `core/BattleState.js` | **戰鬥狀態機**：回合、能量、主角血量、`start`/`startTurn`/`endTurn`、`enemyPhase`、`playCard`、debug 操作。也是 MergeEngine 的 ctx。**有限戰鬥**：`battle` 配置（hp/maxHp/waves/rows/eliteChance…，由 RunState 注入）、`wavesLeft`、`checkOutcome` 發 `BATTLE_WON`/`BATTLE_LOST`；省略配置＝無限補充波（舊沙盒）。**割草手感**：`maybeRushNextWave` —— 出牌清空整片且還有補充波時，下一波當下湧上（不必等回合結束）。 | 改回合流程、出牌結算、抽牌時機、能量、主角血量、敵人相位、勝負判定、清場補波。 |
-| `core/EnemyLibrary.js` | 敵人**定義**（hp、攻擊力、顏色）。 | 新增敵種、改敵人數值。 |
-| `core/Formation.js` | **敵陣**：`lanes`×`maxRank` 格狀，敵人各佔一格 (rank,lane)。`advance`（前進補位：卡住會**側移**到隔壁路）、`refill`、`knockback`（擊退連鎖推擠＋塞滿時側擠）、`prepareFront`（攻擊準備）、縱列/近排查詢（`laneEnemies`/`nearestRanks`/`pickBlast`）。敵人帶 `prepared`（telegraph）與 `statuses`。 | 改敵人移動/補位、擊退、備戰、鎖定查詢。 |
-| `core/combat.js` | **招式鎖定**：`TARGET`（SINGLE / **LANE 貫** / ROW / **NEAR_ROWS 毒霧近數排** / **BLAST 火藥 3×3** / SCATTER 暗器 / MULTI / RANDOM）與 `resolveAttack`。 | 改招式怎麼選敵人、新增鎖定方式。 |
+| `core/ArchiveLibrary.js` | 據點的**成就／畫廊目錄與解鎖條件**。只讀 `MetaState.stats/levels`，零 Phaser；首批解鎖對應完成首局、首次通關、首次永久升級。 | 新增成就、畫卷或調整其解鎖條件。 |
+| `core/BattleState.js` | **戰鬥狀態機**：回合、能量、主角血量、`enemyPhase`、`playCard`。有限戰鬥以 `wavesLeft`＋`rowsLeftInWave` 管理補充波：成功進場一排才消耗；正常敵方相位只補一排；清場給內力／抽牌並開放 `challengeNextWave` 一次送入當前整波。也負責攻擊準備、特殊意圖的回合編排與勝負事件。 | 改回合流程、出牌結算、抽牌時機、能量、主角血量、敵人相位、勝負判定、清場補波。 |
+| `core/EnemyLibrary.js` | 敵人**定義**（hp、攻擊力、準備時間、初始 buff、特殊行動參數、顏色）與敵人 buff 說明。 | 新增敵種、改敵人數值／行為。 |
+| `core/Formation.js` | **敵陣**：`lanes`×`maxRank` 格狀。`advance`（含繞道）、`refill`/`addBackRow`、`knockback`（連鎖推擠＋不動阻擋）、黃色倒數／紅色攻擊準備、特殊意圖、縱列／近排／多波爆炸鎖定。敵人帶 `attackState`、`prepareRemaining`、`intent`、`statuses`、`buffs`。 | 改敵人移動/補位、擊退、備戰、意圖、鎖定查詢。 |
+| `core/combat.js` | **招式鎖定與逐波結算**：`TARGET`（SINGLE / LANE / ROW / NEAR_ROWS / BLAST / SCATTER / MULTI / RANDOM）與 `resolveAttack`；回傳每波 hits、擊退位置及火藥 `areas` 給 UI 重播。 | 改招式怎麼選敵人、新增鎖定方式。 |
 | `core/StatusLibrary.js` | 敵人 **debuff**（燃燒/中毒/破甲/麻痺）：定義、`applyStatus`、`activeStatuses`、`resolveStatusTick`。**中毒/燃燒已有效果**（見 [systems/status.md](systems/status.md)），破甲/麻痺仍是 placeholder。 | 調 DoT 數值（去 `tuning.combat.status`）、加新狀態、設計破甲/麻痺效果。 |
 | `core/Deck.js` | 牌庫與棄牌堆：抽牌、洗牌、棄牌堆循環。不認識合成。 | 改抽牌/洗牌/牌庫耗盡行為。 |
 | `core/Hand.js` | 手牌資料結構（core 側）。順序有意義（最左配對優先）。 | 改手牌的增刪/查找 API。 |
@@ -56,9 +57,10 @@
 | `ui/DragController.js` | 拖曳與箭頭：唯一手勢是「從牌拉箭頭」，**落點決定行為**（越過戰場線＝出牌、落在別張牌＝忘形合成）。 | 改拖曳手勢、箭頭外觀、出牌 vs 合成的判定。 |
 | `ui/DebugPanel.js` | 原生 DOM 疊在 canvas 上的沙盒工具（塞牌、抽牌、結束回合、重開、速度、即時數據）。 | 改 debug 工具的按鈕/顯示。 |
 | `ui/metaStore.js` | 據點狀態的 **localStorage 持久化**（`loadMeta`/`saveMeta`）—— 只有渲染層碰瀏覽器；`core/MetaState` 保持純資料。讀不到/壞掉回全新 MetaState。 | 改存檔 key、序列化。 |
+| `ui/menuChrome.js` | 主題首頁與據點設施共用的水墨山景背景、標題與按鈕元件。 | 改主選單／據點的共用視覺。 |
 | `ui/DeckOverlay.js` | **檢視本局牌組的模態浮層**（高 depth 同場景物件，非切場景，戰鬥中也能開）。用 CardSprite 縮小排格。`mode:'view'`（只看）或 `'select'`（點一張→高亮→按確定才生效，避免誤觸即刪，`onConfirm(index)` 回呼）。 | 改牌組檢視/選牌介面、確認流程。 |
-| `ui/FormationView.js` | **敵陣的視覺層**：把 Formation 投影成肩後視角的一群 sprite。`sync`（前進時全量對齊）、`flashAndPop`（攻擊命中的閃光/傷害數字/倒地）。 | 改敵人怎麼演出被打、前進、死亡。 |
-| `ui/EnemySprite.js` | 單個敵人的視覺：剪影（腳底 origin）＋ 頭上血條。 | 改敵人長相、血條。 |
+| `ui/FormationView.js` | **敵陣的視覺層**：Formation 肩後投影、逐波延遲演出、火藥區域、擊退、特殊行動飄字，以及敵人 hover 意圖／狀態 tooltip。 | 改敵人怎麼演出被打、前進、死亡、特殊行動與提示。 |
+| `ui/EnemySprite.js` | 單個敵人的視覺：剪影、血條、狀態／buff 點，以及黃色準備、紅色攻擊、紫色特殊行動意圖。 | 改敵人長相、血條、頭頂意圖。 |
 | `ui/perspective.js` | **肩後投影**純函式：`project(dist, col, nCols)` → 螢幕 `{x,y,scale}`；`depthFor` 讓前排壓後排。 | 調透視（近大遠小、收攏、地平線）。參數在 `tuning.combat.view`。 |
 | `ui/enemyTextures.js` | 烘敵人白色剪影（tint 上色）與主角肩後背影貼圖。 | 改敵人/主角剪影形狀。 |
 | `ui/Dummy.js` | （已停用）里程碑 1 的木樁。敵陣上線後不再掛進場景。 | 可刪。 |
@@ -72,6 +74,8 @@
 | `scenes/ShopScene.js` | **客棧**：白天池 'inn' 節點進來，買招式（3 貨架）／歇息回血／刪去一招（點牌組選單）／拉霸。交易全走 `RunState`（`buyShopCard`/`restAtInn`/`buyRemoveCard`）。 | 改客棧版面、貨架、服務按鈕、刪牌選單。 |
 | `scenes/SlotScene.js` | **拉霸機**：花速通代幣拉三輪，演轉輪→`applySlotReward`。入夜打贏尾王（有代幣）自動進來、客棧也可進（帶 `back` 回客棧），離開回 RunMap。邏輯全在 `core/slot.js`。 | 改轉輪演出、按鈕、賠率小抄。 |
 | `scenes/EventScene.js` | **奇遇**：白天池 'event' 節點進來，演敘事＋選項按鈕（`RunState.resolveEventChoice`）。立即結果 → 顯示文字＋繼續回 RunMap；觸發戰鬥 → 進 Battle。內容在 `core/EventLibrary.js`。 | 改奇遇版面、選項/結果呈現。 |
-| `scenes/BaseScene.js` | **門派據點**（開機場景＋一局結束的落點，Phase 5）：帶完局的 run 進來 → `meta.earnFromRun` 賺威望、存檔；花威望買永久升級（`MetaState`）；「闖江湖」→ `new RunState({ meta })` → RunMap。存檔在 `ui/metaStore.js`。 | 改據點版面、升級商店、開局按鈕。 |
+| `scenes/TitleScene.js` | **開機主題畫面**：顯示遊戲題名與「開始遊戲」，不建立 run；進入 `BaseScene` 據點。 | 改遊戲首頁、主題視覺、開始按鈕。 |
+| `scenes/BaseScene.js` | **七設施據點大廳＋一局結束落點**：局末 `meta.earnFromRun` 結算威望與跨局統計；導向功名碑、影畫閣、演武堂、藏經閣、江湖錄、秘寶庫，或由「開始挑戰」建立 `RunState`。 | 改據點導航、局末摘要、開始挑戰入口。 |
+| `scenes/FacilityScene.js` | **設施內容頁**：顯示成就、畫廊、跨局強化、卡牌／事件／遺物總表；跨局強化沿用 `MetaState` 並即時存檔。 | 改各設施版面與內容呈現。 |
 | `config/tuning.js` | 所有數值：能量、起手張數、補抽機率、境界上限、連段倍率、動畫節奏、扇形佈局、抽牌窗口、**`run`（日程/尾王節奏/拖延加成/各類戰鬥波數與獎勵）**。 | **任何平衡/手感數字。禁止把數字散落到別處。** |
-| `index.js` | Phaser 遊戲進入點：畫布尺寸/縮放、註冊 `[BaseScene, RunMapScene, BattleScene, ShopScene, SlotScene, EventScene]`，**開機進 Base（門派據點）**。 | 改畫布、註冊新場景、開機場景。 |
+| `index.js` | Phaser 遊戲進入點：畫布尺寸/縮放、註冊所有場景，**開機進 Title 主題畫面**。 | 改畫布、註冊新場景、開機場景。 |

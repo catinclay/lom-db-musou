@@ -22,7 +22,7 @@ export const EVENT = {
   ENEMIES_HIT: 'enemies:hit',
   /** 異常狀態跳動，payload { phase:'play'|'turnEnd', hits:[{uid,damage,killed,status}], changed:[uid] } */
   STATUS_TICKED: 'status:ticked',
-  /** 回合結束敵人前進，payload { formation } */
+  /** 敵人前進／援軍／特殊行動，payload { formation, rowsAdded?, challenge?, specials? } */
   ENEMIES_ADVANCED: 'enemies:advanced',
   /** 接觸的敵人攻擊主角，payload { damage, blocked, hp } */
   PLAYER_HIT: 'player:hit',

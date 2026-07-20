@@ -1,14 +1,20 @@
 import Phaser from 'phaser';
 import { RunState } from '../core/RunState.js';
-import { META_UPGRADE_IDS, getUpgrade } from '../core/MetaState.js';
 import { loadMeta, saveMeta } from '../ui/metaStore.js';
+import { addMenuHeader, drawMenuBackdrop, makeMenuButton } from '../ui/menuChrome.js';
+
+const FACILITIES = [
+  { id: 'achievements', name: '功名碑', desc: '展示已解鎖成就', icon: '碑', fill: 0x26363b, border: 0x7699a0 },
+  { id: 'gallery', name: '影畫閣', desc: '展示已解鎖畫廊', icon: '畫', fill: 0x3d2d3f, border: 0xa875a5 },
+  { id: 'upgrades', name: '演武堂', desc: '花威望進行跨局強化', icon: '武', fill: 0x462b24, border: 0xc16b4f },
+  { id: 'cards', name: '藏經閣', desc: '已知卡牌總表', icon: '招', fill: 0x263a2e, border: 0x62a071 },
+  { id: 'events', name: '江湖錄', desc: '已知事件總表', icon: '錄', fill: 0x3e3523, border: 0xc2a251 },
+  { id: 'relics', name: '秘寶庫', desc: '已知遺物總表', icon: '寶', fill: 0x2e2944, border: 0x8474bd },
+];
 
 /**
- * 門派據點（Phase 5，rogue-lite meta 樞紐）。也是開機場景與一局結束的落點。
- *   進來若帶 `run`（剛結束的一局）→ 依成績賺威望、存檔、顯示結果。
- *   花威望做永久升級（`MetaState`），影響之後每一局起始。
- *   「闖江湖」→ 用 meta 生一局新 RunState → RunMap。
- * 存檔在 localStorage（見 ui/metaStore.js）；core/MetaState 不碰瀏覽器。
+ * 唐門據點設施大廳。局末回到這裡結算威望；功能內容由 FacilityScene 承接。
+ * 「開始挑戰」才會建立新的 RunState，進據點本身不會偷偷開局。
  */
 export class BaseScene extends Phaser.Scene {
   constructor() {
@@ -17,110 +23,57 @@ export class BaseScene extends Phaser.Scene {
 
   create(data) {
     this.meta = loadMeta();
-    this.upgradeObjs = [];
-
     let resultLine = '';
     if (data?.run) {
       const gained = this.meta.earnFromRun(data.run);
       saveMeta(this.meta);
       const won = data.run.outcome === 'won';
-      resultLine = `${won ? '通關！江湖再會' : '敗北…江湖路遠'}　撐到第 ${data.run.day} 天　威望 ＋${gained}`;
+      resultLine = `${won ? '凱旋歸來' : '折戟而歸'} · 第 ${data.run.day} 天 · 威望 ＋${gained}`;
     }
 
-    this.cameras.main.setBackgroundColor('#12100f');
+    drawMenuBackdrop(this, { moonX: 1330, moonY: 100 });
+    addMenuHeader(this, '唐門據點', '選擇一處設施，或整裝踏入江湖');
+
+    makeMenuButton(this, {
+      x: 135, y: 58, w: 190, h: 50, label: '返回主題畫面', fill: 0x1d2427, border: 0x64747a,
+      onClick: () => this.scene.start('Title'), fontSize: 17,
+    });
+
     this.add
-      .text(800, 54, '⛩ 門派據點', { fontFamily: 'sans-serif', fontSize: '44px', color: '#f0dda0', fontStyle: 'bold' })
+      .text(800, 145, `門派威望 ${this.meta.prestige}　·　遠征 ${this.meta.stats.runs} 次　·　通關 ${this.meta.stats.wins} 次`, {
+        fontFamily: 'sans-serif', fontSize: '19px', color: '#d9b45c', fontStyle: 'bold',
+      })
       .setOrigin(0.5);
     if (resultLine) {
-      this.add.text(800, 116, resultLine, { fontFamily: 'sans-serif', fontSize: '22px', color: '#d8c9a8' }).setOrigin(0.5);
+      this.add
+        .text(800, 180, resultLine, { fontFamily: 'sans-serif', fontSize: '18px', color: '#f5d6a1' })
+        .setOrigin(0.5);
     }
-    this.prestigeText = this.add
-      .text(800, 168, '', { fontFamily: 'sans-serif', fontSize: '26px', color: '#d9b45c', fontStyle: 'bold' })
-      .setOrigin(0.5);
-    this.add
-      .text(800, 208, '花門派威望做永久升級 —— 影響之後每一局的起始', { fontFamily: 'sans-serif', fontSize: '15px', color: '#9c8a70' })
-      .setOrigin(0.5);
 
-    this.msg = this.add.text(800, 720, '', { fontFamily: 'sans-serif', fontSize: '20px', color: '#f0dda0' }).setOrigin(0.5);
-
-    this.makeButton(800, 806, 360, 72, '闖江湖', 0x5a2020, 0xc4583f, () => {
-      this.scene.start('RunMap', { run: new RunState({ meta: this.meta }) });
+    const xs = [360, 800, 1240];
+    const ys = [310, 510];
+    FACILITIES.forEach((facility, i) => {
+      const x = xs[i % 3];
+      const y = ys[Math.floor(i / 3)];
+      const rect = makeMenuButton(this, {
+        x, y, w: 370, h: 150, label: facility.name, sub: facility.desc,
+        fill: facility.fill, border: facility.border,
+        onClick: () => this.scene.start('Facility', { facility: facility.id }),
+        fontSize: 26,
+      });
+      this.add
+        .text(x - 140, y - 15, facility.icon, {
+          fontFamily: 'serif', fontSize: '34px', color: '#f0dda0', fontStyle: 'bold',
+        })
+        .setOrigin(0.5)
+        .setDepth(rect.depth + 1);
     });
 
-    this.refresh();
-  }
-
-  refresh() {
-    this.prestigeText.setText(`門派威望：${this.meta.prestige}`);
-    this.renderUpgrades();
-  }
-
-  renderUpgrades() {
-    for (const o of this.upgradeObjs) o.destroy();
-    this.upgradeObjs = [];
-    const startY = 268;
-    const rowH = 86;
-
-    META_UPGRADE_IDS.forEach((id, i) => {
-      const u = getUpgrade(id);
-      const lvl = this.meta.level(id);
-      const cost = this.meta.costOf(id);
-      const maxed = cost == null;
-      const affordable = this.meta.canBuy(id);
-      const y = startY + i * rowH;
-
-      const rect = this.add.rectangle(800, y, 920, 74, 0x241d17).setStrokeStyle(3, maxed ? 0x5a9e4a : 0x6a5540);
-      const name = this.add
-        .text(360, y - 15, `${u.name}　Lv ${lvl}/${u.maxLevel}`, { fontFamily: 'sans-serif', fontSize: '22px', color: '#f5e6c8', fontStyle: 'bold' })
-        .setOrigin(0, 0.5);
-      const desc = this.add
-        .text(360, y + 15, u.desc, { fontFamily: 'sans-serif', fontSize: '15px', color: '#c9b896' })
-        .setOrigin(0, 0.5);
-      this.upgradeObjs.push(rect, name, desc);
-
-      if (maxed) {
-        this.upgradeObjs.push(
-          this.add.text(1180, y, '已滿級', { fontFamily: 'sans-serif', fontSize: '20px', color: '#8fd06a', fontStyle: 'bold' }).setOrigin(0.5)
-        );
-      } else {
-        const btn = this.add
-          .rectangle(1180, y, 210, 54, 0x3a2f22)
-          .setStrokeStyle(3, affordable ? 0xd9b45c : 0x4a3b2a)
-          .setInteractive({ useHandCursor: true });
-        const btxt = this.add
-          .text(1180, y, `升級（威望 ${cost}）`, { fontFamily: 'sans-serif', fontSize: '18px', color: affordable ? '#f5e6c8' : '#6a5a48', fontStyle: 'bold' })
-          .setOrigin(0.5);
-        btn.setAlpha(affordable ? 1 : 0.6);
-        btn.on('pointerover', () => rect && btn.setStrokeStyle(4, 0xffe1b0));
-        btn.on('pointerout', () => btn.setStrokeStyle(3, affordable ? 0xd9b45c : 0x4a3b2a));
-        btn.on('pointerdown', () => this.buy(id));
-        this.upgradeObjs.push(btn, btxt);
-      }
+    makeMenuButton(this, {
+      x: 800, y: 735, w: 470, h: 92, label: '開始挑戰', sub: '建立新遠征 · 闖江湖',
+      fill: 0x54221e, border: 0xd46349,
+      onClick: () => this.scene.start('RunMap', { run: new RunState({ meta: this.meta }) }),
+      fontSize: 30,
     });
-  }
-
-  buy(id) {
-    if (this.meta.buyUpgrade(id)) {
-      saveMeta(this.meta);
-      this.flash(`升級了：${getUpgrade(id).name}`);
-    } else {
-      this.flash('門派威望不足');
-    }
-    this.refresh();
-  }
-
-  flash(text) {
-    this.msg.setText(text);
-    this.msg.setAlpha(1);
-    this.tweens.add({ targets: this.msg, alpha: 0, delay: 900, duration: 600 });
-  }
-
-  makeButton(x, y, w, h, label, fill, border, onClick) {
-    const rect = this.add.rectangle(x, y, w, h, fill, 1).setStrokeStyle(3, border).setInteractive({ useHandCursor: true });
-    this.add.text(x, y, label, { fontFamily: 'sans-serif', fontSize: '26px', color: '#f5e6c8', fontStyle: 'bold' }).setOrigin(0.5);
-    rect.on('pointerover', () => rect.setStrokeStyle(4, 0xffe1b0));
-    rect.on('pointerout', () => rect.setStrokeStyle(3, border));
-    rect.on('pointerdown', onClick);
-    return rect;
   }
 }

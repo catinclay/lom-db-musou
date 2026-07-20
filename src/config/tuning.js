@@ -79,6 +79,11 @@ export const TUNING = {
      */
     drawBatchWindow: 110,
 
+    /** 境界連段的多次施放間隔；毒霧／火藥與一般多波招式共用。 */
+    combatWaveDelay: 240,
+    /** 崩山需在每波傷害後演出擊退，間隔略長。 */
+    knockbackWaveDelay: 320,
+
     /**
      * 「越做越快」的加速。每抽一張、每合一次動能 +1，速度照步數遞增（有上限）。
      * 動能在整個回合內持續累積（見 MergeAnimator.chainStep）—— 抽牌與合成交替循環
@@ -105,11 +110,38 @@ export const TUNING = {
     maxRank: 6,
     /** 場上維持的排數；不足就從最後方補新排湧上 */
     rows: 4,
-    /** 每排人數（隨機落在此區間，會被 lanes 夾住） */
-    minPerRow: 5,
-    maxPerRow: 7,
-    /** 生成大漢的機率，其餘為嘍囉 */
+    /** 每排人數（測試意圖／繞道期間先維持稀疏，會被 lanes 夾住） */
+    minPerRow: 2,
+    maxPerRow: 4,
+    /** 生成精英池敵人的機率，其餘從雜兵池抽取。 */
     eliteChance: 0.15,
+    gruntPool: ['luo', 'kuaiDao'],
+    elitePool: ['han', 'dingZhuang'],
+
+    /** 清空一批敵人時的即時獎勵；每次清場只領一次。 */
+    clearReward: { energy: 1, draw: 1 },
+
+    /** 敵人戰鬥數值與意圖節奏。名字／外觀在 EnemyLibrary。 */
+    enemies: {
+      luo: { hp: 14, damage: 5, prepareTurns: 2 },
+      kuaiDao: { hp: 10, damage: 4, prepareTurns: 1 },
+      han: { hp: 36, damage: 11, prepareTurns: 3 },
+      dingZhuang: {
+        hp: 28,
+        damage: 8,
+        prepareTurns: 3,
+        initialImmovable: 1,
+        special: {
+          id: 'brace',
+          chance: 0.35,
+          chargeTurns: 1,
+          cooldownTurns: 1,
+          buffId: 'immovable',
+          buffStacks: 1,
+          buffCap: 2,
+        },
+      },
+    },
 
     /**
      * 異常狀態（DoT）。兩種節拍：出牌小 tick、回合結束大 tick。
@@ -124,7 +156,7 @@ export const TUNING = {
      */
     status: {
       poison: { damagePerStack: 1, decayRate: 0.1, turnEndTicks: 3 },
-      burn: { growthRate: 0.2, detonateDamage: 2, decayKeep: 0.34 },
+      burn: { growthRate: 0.2, detonateDamage: 1, decayKeep: 0.34 },
     },
 
     /**

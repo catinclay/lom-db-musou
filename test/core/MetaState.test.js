@@ -35,6 +35,7 @@ describe('MetaState 威望與升級', () => {
     expect(m.earnFromRun({ day: 5, outcome: 'lost' })).toBe(5 * TUNING.run.meta.prestigePerDay);
     const g = m.earnFromRun({ day: 10, outcome: 'won' });
     expect(g).toBe(10 * TUNING.run.meta.prestigePerDay + TUNING.run.meta.winBonus);
+    expect(m.stats).toEqual({ runs: 2, wins: 1, bestDay: 10 });
   });
 
   it('toJSON 可序列化還原', () => {
@@ -43,6 +44,15 @@ describe('MetaState 威望與升級', () => {
     const restored = new MetaState(JSON.parse(JSON.stringify(m.toJSON())));
     expect(restored.prestige).toBe(m.prestige);
     expect(restored.level('funds')).toBe(1);
+    expect(restored.stats).toEqual(m.stats);
+  });
+
+  it('舊存檔沒有 stats 時可向後相容', () => {
+    expect(new MetaState({ prestige: 8, levels: { funds: 1 } }).stats).toEqual({
+      runs: 0,
+      wins: 0,
+      bestDay: 0,
+    });
   });
 });
 

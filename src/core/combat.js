@@ -14,7 +14,7 @@ export const TARGET = {
   NEAR_ROWS: 'nearRows',
   /**
    * 範圍爆破（火藥）：一個 area.size×area.size 方塊，
-   * **必含至少一個最近排（frontRank）的敵人**，在此前提下盡量涵蓋最多活敵人。
+   * 第一波必含至少一個最近排敵人；後續波改選尚未使用的位置並優先涵蓋最多活敵人。
    * 目前自動選位（見 Formation.pickBlast）；預留之後讓玩家指定方塊中心。
    */
   BLAST: 'blast',
@@ -39,13 +39,14 @@ export const TARGET = {
  *
  * @param knockback 每次命中後把該波敵人往後震退幾格（0 ＝ 不擊退）
  * @param area 範圍型招式的參數：{ rows }（毒霧近幾排）、{ size }（火藥方塊邊長）
- * @returns { target, hits: [{ uid, damage, killed, wave }], waveLayouts }
+ * @returns { target, hits: [{ uid, damage, killed, wave }], waveLayouts, areas }
  *   waveLayouts[w] ＝ 該波「打完＋擊退後」的全體位置快照 [{uid,rank,lane}]（只有 knockback 才填），
  *   讓 UI 能「打一波→推一波」分開演，而不是全部打完才一次推。
  */
 export function resolveAttack(effect, target, formation, rng = defaultRng, knockback = 0, area = {}) {
   const hits = [];
   const waveLayouts = [];
+  const areas = [];
   const strike = (enemy, dmg, wave = 0) => {
     if (!enemy) return;
     const d = dmg ?? 0; // 純狀態卡（毒霧/火藥）無傷害 —— 別讓 undefined 把血量算成 NaN
@@ -97,11 +98,15 @@ export function resolveAttack(effect, target, formation, rng = defaultRng, knock
     }
 
     case TARGET.BLAST: {
-      // 火藥：必含最近排、涵蓋最多人的 size×size 方塊（每發重選）
+      // 火藥：第一波維持最近排最佳解；後續波挑尚未使用的格位，優先命中最多（允許部分重疊）。
       const size = area.size ?? 3;
+      const usedKeys = new Set();
       for (let w = 0; w < effect.hits; w++) {
-        const struck = formation.pickBlast(size, rng);
-        if (!struck.length) break;
+        const picked = formation.pickBlastArea(size, rng, { usedKeys, first: w === 0 });
+        if (!picked) break;
+        usedKeys.add(picked.key);
+        areas[w] = { rankStart: picked.rankStart, laneStart: picked.laneStart, size: picked.size, key: picked.key };
+        const struck = picked.enemies;
         for (const e of struck) strike(e, effect.damage, w);
         pushWave(struck, w);
       }
@@ -145,5 +150,5 @@ export function resolveAttack(effect, target, formation, rng = defaultRng, knock
       break;
   }
 
-  return { target, hits, waveLayouts };
+  return { target, hits, waveLayouts, areas };
 }

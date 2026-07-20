@@ -1,7 +1,10 @@
 import Phaser from 'phaser';
 import { project, depthFor } from './perspective.js';
 import { EnemySprite } from './EnemySprite.js';
-import { STATUS_DEFS } from '../core/StatusLibrary.js';
+import { STATUS_DEFS, activeStatuses } from '../core/StatusLibrary.js';
+import { ENEMY_BUFF_DEFS, activeEnemyBuffs, getEnemyDef } from '../core/EnemyLibrary.js';
+import { TUNING } from '../config/tuning.js';
+import { tweenTo } from './tweens.js';
 
 /**
  * 敵陣的視覺層：把 core 的 Formation 投影成肩後視角的一群 sprite。
@@ -38,6 +41,9 @@ export class FormationView {
         s.setPosition(p.x, p.y);
         s.setScale(p.scale);
         s.setAlpha(0);
+        s.setInteractive({ useHandCursor: true });
+        s.on('pointerover', () => this.showTooltip(s));
+        s.on('pointerout', () => this.hideTooltip());
         this.sprites.set(e.uid, s);
       }
       s.enemy = e;
@@ -80,7 +86,7 @@ export class FormationView {
       if (!s) return;
       const w = h.wave ?? 0;
       const idx = (within[w] = (within[w] ?? -1) + 1);
-      const delay = w * 150 + idx * 45;
+      const delay = w * TUNING.anim.combatWaveDelay + idx * 45;
 
       this.scene.time.delayedCall(this.d(delay), () => {
         if (!s.active) return;
@@ -182,7 +188,7 @@ export class FormationView {
    *   近戰（lane/row/single）—— 一道劈痕連過所有命中點（貫是縱、橫劈是橫，天然對）。
    *   遠程（scatter/multi/random）—— 暗器由主角方向逐一飛向命中的敵人。
    */
-  playHitFlourish(target, hits) {
+  playHitFlourish(target, hits, areas = [], formation = null) {
     const toPts = (arr) =>
       arr
         .map((h) => this.sprites.get(h.uid))
@@ -195,8 +201,15 @@ export class FormationView {
       return;
     }
 
-    // 範圍型（毒霧/火藥）：不是一道劈痕，而是一片壟罩範圍的爆/霧
-    const area = target === 'blast' || target === 'nearRows';
+    // 火藥用權威 3×3 格位演出，空炸也看得到；每波位置由 core 挑好。
+    if (target === 'blast' && formation && areas.length) {
+      areas.forEach((a, idx) => {
+        if (!a) return;
+        const pts = this.areaPoints(a, formation);
+        this.scene.time.delayedCall(this.d(idx * TUNING.anim.combatWaveDelay), () => this.areaBurst(pts, 0xffa040, true));
+      });
+      return;
+    }
 
     // 連段會多波（h.wave），每波各演一次、依序錯開
     const waves = new Map();
@@ -210,12 +223,20 @@ export class FormationView {
       .forEach((w, idx) => {
         const pts = toPts(waves.get(w));
         if (!pts.length) return;
-        this.scene.time.delayedCall(this.d(idx * 150), () => {
-          if (target === 'blast') this.areaBurst(pts, 0xffa040, true);
-          else if (target === 'nearRows') this.areaBurst(pts, 0x8fd06a, false);
+        this.scene.time.delayedCall(this.d(idx * TUNING.anim.combatWaveDelay), () => {
+          if (target === 'nearRows') this.areaBurst(pts, 0x8fd06a, false);
           else this.slash(pts);
         });
       });
+  }
+
+  areaPoints(area, formation) {
+    const r0 = area.rankStart;
+    const r1 = Math.min(formation.maxRank, r0 + area.size - 1);
+    const l0 = area.laneStart;
+    const l1 = Math.min(formation.lanes - 1, l0 + area.size - 1);
+    return [project(r0, l0, formation.lanes), project(r0, l1, formation.lanes), project(r1, l0, formation.lanes), project(r1, l1, formation.lanes)]
+      .map((p) => ({ x: p.x, y: p.y - 55 * p.scale }));
   }
 
   /**
@@ -269,7 +290,7 @@ export class FormationView {
    * 不像一般攻擊那樣「全部打完才一次推」。
    */
   playKnockbackWaves(hits, waveLayouts, formation) {
-    const WAVE = 300; // 每波間隔拉大，看得清「砸下→震退」
+    const WAVE = TUNING.anim.knockbackWaveDelay;
     const byWave = new Map();
     for (const h of hits) {
       const w = h.wave ?? 0;
@@ -366,6 +387,76 @@ export class FormationView {
     });
   }
 
+  playSpecialActions(actions) {
+    for (const action of actions ?? []) {
+      const s = this.sprites.get(action.uid);
+      if (!s || !s.active) continue;
+      s.refresh();
+      const label = this.scene.add
+        .text(s.x, s.y - 185 * s.scaleY, `不動 ＋${action.added}`, {
+          fontFamily: 'sans-serif', fontSize: '20px', color: '#9fd0e8', fontStyle: 'bold',
+        })
+        .setOrigin(0.5)
+        .setDepth(7000);
+      tweenTo(this.scene, {
+        targets: label,
+        y: label.y - 42,
+        alpha: 0,
+        duration: this.d(650),
+      }).then(() => label.destroy());
+    }
+  }
+
+  showTooltip(sprite) {
+    this.hideTooltip();
+    const e = sprite.enemy;
+    const def = getEnemyDef(e.defId);
+    const lines = [
+      `${def.name}　生命 ${e.hp}/${e.maxHp}`,
+      `攻擊 ${e.damage}　準備 ${def.prepareTurns} 回合`,
+      `意圖：${this.intentDescription(e)}`,
+    ];
+    for (const id of activeStatuses(e)) {
+      const status = STATUS_DEFS[id];
+      lines.push(`${status.name} ${e.statuses[id]}：${status.desc}`);
+    }
+    for (const id of activeEnemyBuffs(e)) {
+      const buff = ENEMY_BUFF_DEFS[id];
+      lines.push(`${buff.name} ${e.buffs[id]}：${buff.desc}`);
+    }
+    if (!activeStatuses(e).length && !activeEnemyBuffs(e).length) lines.push('狀態：無');
+
+    const text = this.scene.add
+      .text(18, 14, lines.join('\n'), {
+        fontFamily: 'sans-serif', fontSize: '15px', color: '#eee2cd', lineSpacing: 7,
+        wordWrap: { width: 370 },
+      })
+      .setOrigin(0, 0);
+    const bg = this.scene.add
+      .rectangle(0, 0, text.width + 36, text.height + 28, 0x14110f, 0.96)
+      .setStrokeStyle(2, 0xd9b45c)
+      .setOrigin(0, 0);
+    this.tooltip = this.scene.add.container(0, 0, [bg, text]).setDepth(9000);
+    const x = Phaser.Math.Clamp(sprite.x + 35, 20, 1580 - bg.width);
+    const y = Phaser.Math.Clamp(sprite.y - bg.height - 35, 80, 820 - bg.height);
+    this.tooltip.setPosition(x, y);
+  }
+
+  intentDescription(enemy) {
+    if (enemy.attackState === 'ready') return `下回合攻擊，造成 ${enemy.damage} 傷害`;
+    if (enemy.attackState === 'charging') return `準備攻擊，剩 ${enemy.prepareRemaining} 回合`;
+    if (enemy.intent?.id === 'brace') {
+      const special = getEnemyDef(enemy.defId).special;
+      return `下回合扎馬：不前進並獲得不動 ${special?.buffStacks ?? 0}`;
+    }
+    return '前進（移動意圖不顯示於頭頂）';
+  }
+
+  hideTooltip() {
+    this.tooltip?.destroy();
+    this.tooltip = null;
+  }
+
   slash(pts) {
     const g = this.scene.add.graphics().setDepth(6500);
     g.lineStyle(7, 0xfff0d0, 0.95);
@@ -408,6 +499,7 @@ export class FormationView {
   }
 
   clear() {
+    this.hideTooltip();
     for (const s of this.sprites.values()) s.destroy();
     this.sprites.clear();
   }
