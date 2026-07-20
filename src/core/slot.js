@@ -1,4 +1,5 @@
 import { getCardDef, CARD_TYPE } from './CardLibrary.js';
+import { weightedPickDefId, rollAcquireRealm } from './rarity.js';
 import { TUNING } from '../config/tuning.js';
 
 /**
@@ -61,9 +62,9 @@ export function resolveSlotReward(reels, run, rng, tuning = TUNING) {
     if (trip === 'coin') return { kind: 'coins', amount: jp, label: `三金！＋${jp} 銀兩` };
     if (trip === 'gourd') return { kind: 'coins', amount: jp, label: `葫蘆大獎！＋${jp} 銀兩` };
     if (trip === 'sword') {
-      const pool = slot.rewardCardPool;
-      const defId = pool[Math.floor(rng() * pool.length)];
-      return { kind: 'card', defId, label: `三劍！獲得【${getCardDef(defId).name}】` };
+      const defId = weightedPickDefId(slot.rewardCardPool, rng, tuning);
+      const realm = rollAcquireRealm(defId, rng, tuning, run.attrs.maxRealm);
+      return { kind: 'card', defId, realm, label: `三劍！獲得【${getCardDef(defId).name}】` };
     }
     // poison / fire → 牌組某攻擊牌附魔（給 level，實際層數出牌時按傷害算）
     const targets = attackIndexes(run.deck);
@@ -98,7 +99,7 @@ export function applySlotReward(run, reward) {
       run.money += reward.amount;
       break;
     case 'card':
-      run.addDeckCard(reward.defId);
+      run.addDeckCard(reward.defId, reward.realm > 1 ? { realm: reward.realm } : {});
       break;
     case 'enchant':
       run.enchantDeckCard(reward.targetIndex, reward.statusId, reward.level);

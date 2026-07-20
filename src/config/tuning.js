@@ -238,6 +238,23 @@ export const TUNING = {
     /** 跨 run 的「門派威望」（Phase 5）：run 結束依撐到第幾天 ＋ 通關獎勵賺取，回據點花在永久升級。 */
     meta: { prestigePerDay: 3, winBonus: 25 },
 
+    /**
+     * 稀有度（稀有武功/絕學）。只影響「取得」——不改境界機制。
+     *   weights       從混合卡池加權挑一張時，各稀有度的權重（絕學越稀有）。
+     *   acquireRealm  取得時擲的境界範圍 [lo, hi]（含端點，會再夾 attrs.maxRealm）。
+     *                 稀有/絕學「一入手就較高境界」,順帶拉高附魔上限（enchantCap=2^(realm-1)）。
+     *   shopRareChance 商店每格貨架改抽「稀有以上」卡池的機率（否則走普通池）。
+     *   rarePriceMult 稀有/絕學貨架的加價倍率。
+     *   parseCost     參悟服務：把牌組某張牌的境界永久 +1（一輪內、跨戰保存）的花費。
+     */
+    rarity: {
+      weights: { common: 70, rare: 24, signature: 6 },
+      acquireRealm: { common: [1, 1], rare: [2, 3], signature: [3, 5] },
+      shopRareChance: 0.3,
+      rarePriceMult: 1.9,
+      parseCost: 40,
+    },
+
     /** 奇遇（EventLibrary）的經濟/風險數值。內容（文案、選項）在 core/EventLibrary.js。 */
     event: {
       smallCoins: 6, // 保守選項的小銀兩
@@ -251,6 +268,8 @@ export const TUNING = {
       cardPrice: 18, // 郎中傳一招
       trainCost: 30, // 高人指點：練內力/起手張數
       realmCost: 55, // 高人指點：悟境界上限（較貴）
+      manualCost: 45, // 祕笈殘卷：參詳習得一招絕學（signature）
+      manualSell: 20, // 祕笈殘卷：變賣換銀兩
     },
 
     /**
@@ -281,6 +300,8 @@ export const TUNING = {
     shop: {
       cardCount: 3,
       cardPool: ['hengPi', 'guan', 'anqi', 'bengShan', 'duWu', 'huoYao', 'yunQi', 'linJi', 'wangXing'],
+      /** 稀有以上的專屬貨架卡池（shopRareChance 命中時從這裡挑）。 */
+      rareCardPool: ['huiLongJian', 'dianPoYunGuan'],
       cardPrice: { min: 14, max: 26 },
       removePrice: 20,
       relicPrice: 45,

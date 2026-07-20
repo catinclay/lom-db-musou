@@ -2,7 +2,8 @@ import { defaultRng } from './rng.js';
 import { TUNING } from '../config/tuning.js';
 import { RELIC_IDS, getRelicDef } from './RelicLibrary.js';
 import { EVENT_IDS, getEventDef } from './EventLibrary.js';
-import { getCardDef, CARD_TYPE } from './CardLibrary.js';
+import { getCardDef, CARD_TYPE, cardRarity, RARITY } from './CardLibrary.js';
+import { weightedPickDefId, rollAcquireRealm } from './rarity.js';
 
 /**
  * 一局「江湖遠征」的權威狀態。零 Phaser —— 場景讀它、驅動它，戰鬥仍是同一個 BattleState。
@@ -274,11 +275,34 @@ export class RunState {
   // deck 是 spec 陣列；spec.enchants 由 BattleState.start 的 createCard 種進戰鬥實例，
   // 所以「附魔到牌組某張牌」＝改該 spec 的 enchants，就會在之後每場戰鬥生效。
 
-  /** 加一張牌進牌組。@returns 新 spec */
+  /** 加一張牌進牌組。extra 可帶 realm（取得境界）/enchants。@returns 新 spec */
   addDeckCard(defId, extra = {}) {
     const spec = { defId, ...extra };
     this.deck.push(spec);
     return spec;
+  }
+
+  /**
+   * 依稀有度「取得」一張牌:擲取得境界（夾主角 maxRealm）後加進牌組。
+   * 普通卡境界一、稀有/絕學直接較高境界。事件/郎中傳招等管道用。
+   * @returns 新 spec
+   */
+  acquireDeckCard(defId, rng = this.rng) {
+    const realm = rollAcquireRealm(defId, rng, this.tuning, this.attrs.maxRealm);
+    return this.addDeckCard(defId, realm > 1 ? { realm } : {});
+  }
+
+  /**
+   * 參悟服務:把牌組第 index 張的境界永久 +1（夾主角 maxRealm）。戰鬥外調整,
+   * 寫回牌組境界（spec.realm）,一輪內跨戰保存;新 run 重建牌組即回歸。
+   * @returns 新境界,或 null（index 無效）
+   */
+  upgradeDeckCardRealm(index) {
+    const spec = this.deck[index];
+    if (!spec) return null;
+    const next = Math.min((spec.realm ?? 1) + 1, this.attrs.maxRealm);
+    spec.realm = next;
+    return next;
   }
 
   /** 從牌組移除第 index 張。@returns 是否成功 */
@@ -307,15 +331,26 @@ export class RunState {
 
   // ── 客棧（商店）──────────────────────────────────────
 
-  /** 生成一間客棧的貨架：cardCount 張待售招式（各帶價）＋ 刪牌/歇息服務 ＋（有的話）一件遺物。 */
+  /**
+   * 生成一間客棧的貨架：cardCount 張待售招式（各帶價與取得境界）＋ 刪牌/歇息服務 ＋（有的話）一件遺物。
+   * 每格以 shopRareChance 改抽「稀有以上」專屬池,否則普通池;皆依稀有度權重挑,取得境界隨稀有度。
+   */
   generateShop() {
     const s = this.tuning.run.shop;
-    const pool = [...s.cardPool];
+    const rr = this.tuning.run.rarity;
+    const used = new Set();
     const cards = [];
-    for (let i = 0; i < s.cardCount && pool.length; i++) {
-      const defId = pool.splice(Math.floor(this.rng() * pool.length), 1)[0];
-      const price = s.cardPrice.min + Math.floor(this.rng() * (s.cardPrice.max - s.cardPrice.min + 1));
-      cards.push({ defId, price, sold: false });
+    for (let i = 0; i < s.cardCount; i++) {
+      const useRare = this.rng() < rr.shopRareChance;
+      const source = (useRare ? s.rareCardPool ?? [] : s.cardPool).filter((id) => !used.has(id));
+      const pool = source.length ? source : s.cardPool.filter((id) => !used.has(id));
+      const defId = weightedPickDefId(pool, this.rng, this.tuning);
+      if (!defId) break;
+      used.add(defId);
+      const realm = rollAcquireRealm(defId, this.rng, this.tuning, this.attrs.maxRealm);
+      let price = s.cardPrice.min + Math.floor(this.rng() * (s.cardPrice.max - s.cardPrice.min + 1));
+      if (cardRarity(defId) !== RARITY.COMMON) price = Math.round(price * rr.rarePriceMult);
+      cards.push({ defId, price, realm, sold: false });
     }
     const relicPool = RELIC_IDS.filter((id) => !this.ownsRelic(id));
     const relic = relicPool.length
@@ -339,9 +374,22 @@ export class RunState {
     const offer = shop?.cards?.[i];
     if (!offer || offer.sold || this.money < offer.price) return false;
     this.money -= offer.price;
-    this.addDeckCard(offer.defId);
+    this.addDeckCard(offer.defId, offer.realm > 1 ? { realm: offer.realm } : {});
     offer.sold = true;
     return true;
+  }
+
+  /**
+   * 花錢參悟：把牌組第 index 張的境界 +1（戰鬥外調整,寫回牌組境界）。
+   * 已達 maxRealm 或錢不夠則不收錢。@returns 新境界,或 null（不成交）
+   */
+  buyParseCard(index) {
+    const cost = this.tuning.run.rarity.parseCost;
+    const spec = this.deck[index];
+    if (!spec || this.money < cost) return null;
+    if ((spec.realm ?? 1) >= this.attrs.maxRealm) return null;
+    this.money -= cost;
+    return this.upgradeDeckCardRealm(index);
   }
 
   /** 花錢刪去牌組第 index 張。@returns 是否成交 */

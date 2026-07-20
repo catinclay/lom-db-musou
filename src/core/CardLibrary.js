@@ -29,6 +29,18 @@ export const CARD_TYPE = {
 };
 
 /**
+ * 稀有度：影響取得管道的權重與「取得時的境界」。**不改境界機制本身** ——
+ * 每張卡一律支援境界 1–5（吃 realmScale / realmDamageCurve）；稀有/絕學只是
+ * 取得時通常直接拿到較高境界的版本（實際境界範圍在 tuning.run.rarity.acquireRealm）。
+ * def 不寫 rarity 即為普通。
+ */
+export const RARITY = {
+  COMMON: 'common',
+  RARE: 'rare',
+  SIGNATURE: 'signature', // 絕學
+};
+
+/**
  * 常見的境界成長曲線，給 realmScale 挑用。
  * 預設（不寫 realmScale）走等比 —— 適合傷害/護甲。
  * 功能牌（內力、抽牌）刻意走溫和的線性，否則境界一升強度就爆炸。
@@ -157,6 +169,39 @@ export const CARD_DEFS = {
   },
 
   /**
+   * 點破雲關 —— 絕學（signature）。一記凌厲的貫穿指勁，由前貫到後、單發高傷。
+   * 取得時通常直接是高境界（見 tuning.run.rarity.acquireRealm.signature），高傷順帶讓
+   * 附魔層數（enchantScale × 基礎傷）也高。境界一數值定義於此，高境界靠曲線放大。
+   */
+  dianPoYunGuan: {
+    defId: 'dianPoYunGuan',
+    name: '點破雲關',
+    type: CARD_TYPE.ATTACK,
+    target: TARGET.LANE,
+    rarity: RARITY.SIGNATURE,
+    cost: 2,
+    base: { hits: 1, damage: 14 },
+    enchantScale: 0.18, // 單路高傷 → 附魔層數給得多
+    desc: '一指貫破雲關，洞穿最近一路、由前到後',
+  },
+
+  /**
+   * 回龍劍 —— 稀有（rare）。一記迴身重劈，橫掃最前一列並震退。
+   */
+  huiLongJian: {
+    defId: 'huiLongJian',
+    name: '回龍劍',
+    type: CARD_TYPE.ATTACK,
+    target: TARGET.ROW,
+    rarity: RARITY.RARE,
+    cost: 2,
+    base: { hits: 1, damage: 11 },
+    knockback: 1,
+    enchantScale: 0.09,
+    desc: '迴身一劍橫掃最前列，震退一步',
+  },
+
+  /**
    * 忘形 —— 純催化劑。
    * 不帶境界（可與任何境界合成）、無戰鬥數值、不能單獨出牌。
    * 拖到任一張牌上即能跨名合成一次。
@@ -176,4 +221,14 @@ export function getCardDef(defId) {
   const def = CARD_DEFS[defId];
   if (!def) throw new Error(`未知的卡牌定義: ${defId}`);
   return def;
+}
+
+/** 一張卡的稀有度（未標示 = 普通）。 */
+export function cardRarity(defId) {
+  return CARD_DEFS[defId]?.rarity ?? RARITY.COMMON;
+}
+
+/** 某稀有度的所有 defId（催化劑排除；供取得管道組專屬卡池用）。 */
+export function defIdsByRarity(rarity) {
+  return Object.keys(CARD_DEFS).filter((id) => !CARD_DEFS[id].catalyst && cardRarity(id) === rarity);
 }
