@@ -111,6 +111,54 @@ describe('finale：王在正常波清完後登場', () => {
   });
 });
 
+describe('特殊行動：召喚 / 後退（specials 陣列）', () => {
+  it('召喚在王前方最近空排放一排小兵,並設冷卻', () => {
+    const f = new Formation(7, 6, seededRng(1));
+    f.enemies.push(createEnemy('touMu', 3, 3));
+    const boss = f.at(3, 3);
+    boss.intent = { id: 'summon', remaining: 1 };
+    const { resolved } = f.resolveSpecialActions();
+    const minions = f.living.filter((e) => e.defId === 'luo');
+    expect(minions.length).toBe(2); // summonCount
+    expect(minions.every((m) => m.rank === 0)).toBe(true); // 前方最近空排
+    expect(resolved[0]).toMatchObject({ uid: boss.uid, type: 'summon', summoned: 2 });
+    expect(boss.specialCooldowns.summon).toBeGreaterThan(0);
+  });
+
+  it('蓄力（remaining>1）先倒數不執行', () => {
+    const f = new Formation(7, 6, seededRng(1));
+    f.enemies.push(createEnemy('touMu', 3, 3));
+    const boss = f.at(3, 3);
+    boss.intent = { id: 'summon', remaining: 2 };
+    f.resolveSpecialActions();
+    expect(boss.intent).toMatchObject({ id: 'summon', remaining: 1 });
+    expect(f.living.some((e) => e.defId === 'luo')).toBe(false);
+  });
+
+  it('retreatEnemy 往更遠 rank 移動,受佔格阻擋', () => {
+    const f = new Formation(7, 6, seededRng(1));
+    f.enemies.push(createEnemy('moWang', 1, 3));
+    const boss = f.at(1, 3);
+    expect(f.retreatEnemy(boss, 1)).toBe(true);
+    expect(boss.rank).toBe(2);
+    f.enemies.push(createEnemy('luo', 3, 3)); // 擋住後方
+    expect(f.retreatEnemy(boss, 1)).toBe(false);
+    expect(boss.rank).toBe(2);
+  });
+
+  it('planSpecialIntents 尊重冷卻', () => {
+    const f = new Formation(7, 6, () => 0); // rng 恆 0 → chance 必中
+    f.enemies.push(createEnemy('touMu', 3, 3));
+    const boss = f.at(3, 3);
+    boss.specialCooldowns.summon = 2;
+    f.planSpecialIntents();
+    expect(boss.intent).toBeNull(); // 冷卻中不預告
+    boss.specialCooldowns.summon = 0;
+    f.planSpecialIntents();
+    expect(boss.intent).toMatchObject({ id: 'summon' });
+  });
+});
+
 describe('無王戰鬥維持原行為', () => {
   it('清空且無補充波即判勝（bossDefId 省略）', () => {
     const b = new BattleState({

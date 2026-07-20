@@ -20,6 +20,15 @@ export function isBossDef(defId) {
   return ENEMY_DEFS[defId]?.isBoss === true;
 }
 
+/**
+ * 一種敵人的特殊行動清單。相容舊的單一 `special`（定樁力士）與新的 `specials` 陣列（王）。
+ * 每個 special：{ id, type?, chance, chargeTurns, cooldownTurns, ...型別參數 }。
+ *   type 省略但帶 buffId ＝ 疊 buff（如扎馬取得不動）；'summon'/'retreat'/'projectile' 見 Formation。
+ */
+export function enemySpecials(def) {
+  return def.specials ?? (def.special ? [def.special] : []);
+}
+
 export const ENEMY_BUFF = { IMMOVABLE: 'immovable' };
 
 export const ENEMY_BUFF_DEFS = {

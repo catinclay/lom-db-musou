@@ -148,8 +148,26 @@ export const TUNING = {
        *   specials：召喚/投射物/後退（Phase 2–3 加，資料驅動）。
        * 頭目＝小王（精英戰）；魔王＝魔王/最終戰。
        */
-      touMu: { hp: 90, damage: 14, prepareTurns: 2, attackRange: 1, isBoss: true },
-      moWang: { hp: 180, damage: 20, prepareTurns: 2, attackRange: 2, isBoss: true },
+      touMu: {
+        hp: 90,
+        damage: 14,
+        prepareTurns: 2,
+        attackRange: 1,
+        isBoss: true,
+        specials: [
+          { id: 'summon', type: 'summon', chance: 0.35, chargeTurns: 1, cooldownTurns: 2, summonDefId: 'luo', summonCount: 2 },
+        ],
+      },
+      moWang: {
+        hp: 180,
+        damage: 20,
+        prepareTurns: 2,
+        attackRange: 2,
+        isBoss: true,
+        specials: [
+          { id: 'summon', type: 'summon', chance: 0.4, chargeTurns: 1, cooldownTurns: 2, summonDefId: 'kuaiDao', summonCount: 3 },
+        ],
+      },
     },
 
     /**

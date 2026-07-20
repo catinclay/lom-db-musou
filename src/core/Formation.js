@@ -1,4 +1,4 @@
-import { ENEMY_BUFF, getEnemyDef } from './EnemyLibrary.js';
+import { ENEMY_BUFF, getEnemyDef, enemySpecials } from './EnemyLibrary.js';
 import { defaultRng } from './rng.js';
 
 /**
@@ -33,7 +33,7 @@ export function createEnemy(defId, rank, lane) {
     attackState: 'none', // none | charging（黃！）| ready（紅！；下回合攻擊）
     prepareRemaining: 0,
     intent: null, // 距離外的特殊行動預告，如 { id:'brace', remaining:1 }
-    specialCooldown: 0,
+    specialCooldowns: {}, // 每個 special id 各自的冷卻回合
     statuses: {},
     buffs: def.initialImmovable ? { [ENEMY_BUFF.IMMOVABLE]: def.initialImmovable } : {},
   };
@@ -219,7 +219,11 @@ export class Formation {
   }
 
   tickSpecialCooldowns() {
-    for (const e of this.living) e.specialCooldown = Math.max(0, (e.specialCooldown ?? 0) - 1);
+    for (const e of this.living) {
+      for (const k of Object.keys(e.specialCooldowns ?? {})) {
+        e.specialCooldowns[k] = Math.max(0, e.specialCooldowns[k] - 1);
+      }
+    }
   }
 
   /** 執行已預告的特殊行動；蓄力與執行期間都不移動。 */
@@ -233,32 +237,76 @@ export class Formation {
         e.intent.remaining -= 1;
         continue;
       }
-      const def = getEnemyDef(e.defId);
-      const special = def.special;
-      if (special?.id === e.intent.id && special.buffId) {
-        const before = e.buffs[special.buffId] ?? 0;
-        e.buffs[special.buffId] = Math.min(special.buffCap, before + special.buffStacks);
-        resolved.push({
-          uid: e.uid,
-          intent: special.id,
-          buffId: special.buffId,
-          added: e.buffs[special.buffId] - before,
-          stacks: e.buffs[special.buffId],
-        });
-        e.specialCooldown = special.cooldownTurns;
+      const sp = enemySpecials(getEnemyDef(e.defId)).find((s) => s.id === e.intent.id);
+      if (sp) {
+        const outcome = this.applySpecial(e, sp);
+        if (outcome) resolved.push(outcome);
+        e.specialCooldowns[sp.id] = sp.cooldownTurns ?? 0;
       }
       e.intent = null;
     }
     return { stayed, resolved };
   }
 
-  /** 為下一個敵人相位規劃特殊行動；移動本身不建立頭頂意圖。 */
+  /** 依 special.type 執行一次特殊行動,回傳給 UI 演出的結果（null＝沒發生）。 */
+  applySpecial(enemy, sp) {
+    const base = { uid: enemy.uid, intent: sp.id, type: sp.type ?? 'buff' };
+    // 疊 buff（如扎馬取得不動）
+    if (sp.buffId) {
+      const before = enemy.buffs[sp.buffId] ?? 0;
+      enemy.buffs[sp.buffId] = Math.min(sp.buffCap, before + sp.buffStacks);
+      return { ...base, type: 'buff', buffId: sp.buffId, added: enemy.buffs[sp.buffId] - before, stacks: enemy.buffs[sp.buffId] };
+    }
+    if (sp.type === 'summon') {
+      const rank = this.summonAt(sp.summonDefId, sp.summonCount ?? 2);
+      return rank == null ? null : { ...base, summoned: sp.summonCount ?? 2 };
+    }
+    if (sp.type === 'retreat') {
+      return this.retreatEnemy(enemy, sp.steps ?? 1) ? base : null;
+    }
+    return null;
+  }
+
+  /**
+   * 召喚：在王「前方」最靠近的一整排空排放一排小兵（夾在玩家與王之間,立即成為威脅）。
+   * 沒有完全空的排就作罷。@returns 生成的 rank,或 null
+   */
+  summonAt(defId, count) {
+    if (!defId) return null;
+    for (let r = 0; r <= this.maxRank; r++) {
+      if (!this.living.some((e) => e.rank === r)) {
+        this.addRow(r, defId, count);
+        return r;
+      }
+    }
+    return null;
+  }
+
+  /** 後退：往更遠的 rank 移 steps 格（維持遠程距離）。受 maxRank 與佔格限制。@returns 是否移動 */
+  retreatEnemy(enemy, steps = 1) {
+    let moved = false;
+    for (let i = 0; i < steps; i++) {
+      const to = enemy.rank + 1;
+      if (to > this.maxRank || this.at(to, enemy.lane)) break;
+      enemy.rank = to;
+      this.clearAttackPreparation(enemy);
+      moved = true;
+    }
+    return moved;
+  }
+
+  /** 為下一個敵人相位規劃特殊行動；移動本身不建立頭頂意圖。每敵最多預告一個。 */
   planSpecialIntents() {
     for (const e of this.living) {
-      const special = getEnemyDef(e.defId).special;
-      if (!special || e.rank === 0 || e.intent || e.specialCooldown > 0) continue;
-      if ((e.buffs[special.buffId] ?? 0) >= special.buffCap) continue;
-      if (this.rng() < special.chance) e.intent = { id: special.id, remaining: special.chargeTurns };
+      if (e.rank === 0 || e.intent) continue;
+      for (const sp of enemySpecials(getEnemyDef(e.defId))) {
+        if ((e.specialCooldowns[sp.id] ?? 0) > 0) continue;
+        if (sp.buffId && (e.buffs[sp.buffId] ?? 0) >= sp.buffCap) continue;
+        if (this.rng() < sp.chance) {
+          e.intent = { id: sp.id, remaining: sp.chargeTurns };
+          break;
+        }
+      }
     }
   }
 

@@ -83,9 +83,10 @@ export class EnemySprite extends Phaser.GameObjects.Container {
       .setVisible(charging);
     this.body.setTint(ready ? 0xff5a3c : this.tint);
 
-    const special = this.enemy.rank > 0 && this.enemy.intent?.id === 'brace';
-    this.specialWarn.setVisible(special);
-    this.specialLabel.setVisible(special);
+    const intentId = this.enemy.rank > 0 ? this.enemy.intent?.id : null;
+    const intentLabel = { brace: '扎馬', summon: '召喚', projectile: '施法', retreat: '後退' }[intentId];
+    this.specialWarn.setVisible(Boolean(intentLabel));
+    this.specialLabel.setText(intentLabel ?? '').setVisible(Boolean(intentLabel));
 
     const active = [
       ...activeStatuses(this.enemy).map((id) => ({ id, stacks: this.enemy.statuses[id], def: STATUS_DEFS[id] })),
