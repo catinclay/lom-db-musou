@@ -170,14 +170,22 @@ export class Formation {
     return false;
   }
 
-  /** 已完成準備、在接觸位（rank 0）的活敵人攻擊力總和。 */
+  /**
+   * 該敵人是否已進入攻擊射程。雜兵射程 0（只在接觸位 rank 0 攻擊）；
+   * 精英/魔王的 def.attackRange > 0 可在較遠的 rank 就攻擊，並在到達射程後停止前進。
+   */
+  inAttackRange(enemy) {
+    return enemy.rank <= (getEnemyDef(enemy.defId).attackRange ?? 0);
+  }
+
+  /** 已完成準備、在射程內的活敵人攻擊力總和。 */
   contactDamage() {
-    return this.living.filter((e) => e.rank === 0 && e.attackState === 'ready').reduce((s, e) => s + e.damage, 0);
+    return this.living.filter((e) => this.inAttackRange(e) && e.attackState === 'ready').reduce((s, e) => s + e.damage, 0);
   }
 
   /** 取出本回合攻擊者，並讓它們攻擊後重新從完整準備回合開始。 */
   consumeContactAttacks() {
-    const attackers = this.living.filter((e) => e.rank === 0 && e.attackState === 'ready');
+    const attackers = this.living.filter((e) => this.inAttackRange(e) && e.attackState === 'ready');
     for (const e of attackers) this.beginAttackPreparation(e);
     return attackers;
   }
@@ -196,7 +204,7 @@ export class Formation {
   /** 已在攻擊線的敵人推進一格準備：黃 2 → 黃 1 → 紅。 */
   progressContactPreparation(skip = new Set()) {
     for (const e of this.living) {
-      if (e.rank !== 0 || e.attackState !== 'charging' || skip.has(e.uid)) continue;
+      if (!this.inAttackRange(e) || e.attackState !== 'charging' || skip.has(e.uid)) continue;
       e.prepareRemaining = Math.max(0, e.prepareRemaining - 1);
       if (e.prepareRemaining === 0) e.attackState = 'ready';
     }
@@ -205,8 +213,8 @@ export class Formation {
   /** 新進攻擊線者開始完整準備；被推出攻擊線者清空進度。 */
   initializeContactPreparation() {
     for (const e of this.living) {
-      if (e.rank === 0 && e.attackState === 'none') this.beginAttackPreparation(e);
-      else if (e.rank > 0 && e.attackState !== 'none') this.clearAttackPreparation(e);
+      if (this.inAttackRange(e) && e.attackState === 'none') this.beginAttackPreparation(e);
+      else if (!this.inAttackRange(e) && e.attackState !== 'none') this.clearAttackPreparation(e);
     }
   }
 
@@ -265,7 +273,8 @@ export class Formation {
    */
   advance({ stay = new Set() } = {}) {
     for (const e of this.livingEnemiesInOrder()) {
-      if (e.rank === 0 || stay.has(e.uid)) continue;
+      // 到達自身射程（雜兵＝rank 0；遠程王＝更遠）即停止前進，在該處備戰。
+      if (this.inAttackRange(e) || stay.has(e.uid)) continue;
       const r = e.rank;
       const lane = e.lane;
       if (!this.at(r - 1, lane)) {

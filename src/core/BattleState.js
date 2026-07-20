@@ -65,6 +65,9 @@ export class BattleState {
     this.reinforcementRowsPerWave = bc.rows ?? this.tuning.combat.rows;
     this.wavesLeft = bc.waves ?? Infinity;
     this.rowsLeftInWave = this.wavesLeft > 0 ? this.reinforcementRowsPerWave : 0;
+    // 精英/魔王：正常補充波清完後才從最後方登場（finale）。省略 bossDefId ＝ 無王，行為照舊。
+    this.bossDefId = bc.bossDefId ?? null;
+    this.bossSpawned = false;
     this.awaitingWaveChoice = false;
     this.clearRewardClaimed = false;
     this.pendingClearReward = null;
@@ -121,11 +124,28 @@ export class BattleState {
     if (this.playerHp <= 0) {
       this.outcome = 'lost';
       this.bus.emit(EVENT.BATTLE_LOST, { state: this });
-    } else if (this.formation.isEmpty && !this.hasReinforcements) {
+    } else if (this.formation.isEmpty && !this.hasReinforcements && !this.hasPendingBoss) {
       this.outcome = 'won';
       this.bus.emit(EVENT.BATTLE_WON, { state: this });
     }
     return this.outcome;
+  }
+
+  /** 還有未登場的王（正常波清完後才登場，因此王未死不算勝）。 */
+  get hasPendingBoss() {
+    return Boolean(this.bossDefId) && !this.bossSpawned;
+  }
+
+  /**
+   * 正常補充波用盡後，讓王從最後方登場（單體置中）。
+   * @returns 是否生成了王（成功才發事件）
+   */
+  maybeSpawnBoss() {
+    if (!this.hasPendingBoss || this.hasReinforcements) return false;
+    const added = this.formation.addBackRow({ defId: () => this.bossDefId, count: () => 1 });
+    if (!added) return false;
+    this.bossSpawned = true;
+    return true;
   }
 
   /** @returns transcript */
@@ -230,11 +250,13 @@ export class BattleState {
     const specials = this.formation.resolveSpecialActions();
     this.formation.advance({ stay: specials.stayed });
     const rowsAdded = this.spawnReinforcementRows(1);
+    const bossEntered = this.maybeSpawnBoss(); // 正常波清完 → 王登場
     this.formation.initializeContactPreparation();
     this.formation.planSpecialIntents();
     this.bus.emit(EVENT.ENEMIES_ADVANCED, {
       formation: this.formation,
       rowsAdded,
+      bossEntered,
       specials: specials.resolved,
     });
 
@@ -355,7 +377,13 @@ export class BattleState {
       result.transcript = [...(result.transcript ?? []), ...clearReward.transcript];
       this.bus.emit(EVENT.ENERGY_CHANGED, { energy: this.energy });
     }
-    // 這張牌可能清空了最後一波敵陣（且無補充波）⇒ 判勝
+    // 清空正常波後,王當回合就從最後方登場（而非等下一次敵方相位）。
+    if (this.maybeSpawnBoss()) {
+      this.formation.initializeContactPreparation();
+      result.bossEntered = true;
+      this.bus.emit(EVENT.ENEMIES_ADVANCED, { formation: this.formation, bossEntered: true, rowsAdded: 0 });
+    }
+    // 這張牌可能清空了最後一波敵陣（且無補充波、無待登場王）⇒ 判勝
     this.checkOutcome();
     return { ok: true, result };
   }

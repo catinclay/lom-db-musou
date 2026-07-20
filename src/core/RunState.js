@@ -201,6 +201,7 @@ export class RunState {
       waves,
       rows: base.rows,
       eliteChance,
+      bossDefId: base.bossDefId ?? null, // 精英/魔王 finale（尋常廝殺無王）
       relics: [...this.relics],
       attrs: { ...this.attrs },
     };

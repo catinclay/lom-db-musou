@@ -141,6 +141,15 @@ export const TUNING = {
           buffCap: 2,
         },
       },
+
+      /**
+       * 精英/魔王（isBoss）：前面波次清完才登場（finale），視覺上鏡射一條大血條在畫面正上方。
+       *   attackRange：可在 rank ≤ N 就發動攻擊（雜兵省略＝0，只在接觸位打）。到達射程即停止前進。
+       *   specials：召喚/投射物/後退（Phase 2–3 加，資料驅動）。
+       * 頭目＝小王（精英戰）；魔王＝魔王/最終戰。
+       */
+      touMu: { hp: 90, damage: 14, prepareTurns: 2, attackRange: 1, isBoss: true },
+      moWang: { hp: 180, damage: 20, prepareTurns: 2, attackRange: 2, isBoss: true },
     },
 
     /**
@@ -228,10 +237,10 @@ export const TUNING = {
     speedrunTokensPerSkipped: 1,
     dally: { wavesPerEvent: 0.5, eliteChancePerEvent: 0.03 },
     battle: {
-      battle: { waves: 2, rows: 3, eliteChance: 0.12 }, // 尋常廝殺
-      elite: { waves: 3, rows: 3, eliteChance: 0.4 }, // 精英 / 小王
-      boss: { waves: 4, rows: 4, eliteChance: 0.6 }, // 魔王
-      final: { waves: 6, rows: 4, eliteChance: 0.85 }, // 最終大魔王
+      battle: { waves: 2, rows: 3, eliteChance: 0.12 }, // 尋常廝殺（無王）
+      elite: { waves: 3, rows: 3, eliteChance: 0.4, bossDefId: 'touMu' }, // 精英 / 小王
+      boss: { waves: 4, rows: 4, eliteChance: 0.6, bossDefId: 'moWang' }, // 魔王
+      final: { waves: 6, rows: 4, eliteChance: 0.85, bossDefId: 'moWang' }, // 最終大魔王
     },
     reward: { battle: 6, elite: 12, boss: 25, final: 0 },
 

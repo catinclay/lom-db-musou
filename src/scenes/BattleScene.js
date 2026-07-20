@@ -13,6 +13,7 @@ import { project } from '../ui/perspective.js';
 import { ensureCardTextures } from '../ui/cardTextures.js';
 import { ensureEnemyTextures, PLAYER_TEX } from '../ui/enemyTextures.js';
 import { realmLabel } from '../ui/format.js';
+import { isBossDef, getEnemyDef } from '../core/EnemyLibrary.js';
 import { TUNING } from '../config/tuning.js';
 
 const BATTLEFIELD_Y = 600;
@@ -50,6 +51,7 @@ export class BattleScene extends Phaser.Scene {
     this.formationView = new FormationView(this);
     this.formationView.attackOrigin = { x: 250, y: 720 }; // 暗器從主角這邊飛出
     this.drawPlayerAndHud();
+    this.drawBossBar();
 
     this.handView = new HandView(this, { centerX: HAND_CENTER_X, baseY: HAND_BASE_Y });
     this.animator = new MergeAnimator(this, this.handView, {
@@ -127,6 +129,7 @@ export class BattleScene extends Phaser.Scene {
     if (this.battle.hand) {
       this.panel.update(this.battle);
       this.updateHud();
+      this.updateBossBar();
       this.handView.updateCardHints(this.battle.combo.lastRealm, this.battle.energy);
       // 演出進行中不讓按結束回合（避免打斷連鎖）
       this.endTurnBtn?.setAlpha(this.animator.playing || this._concluded ? 0.4 : 1);
@@ -255,6 +258,41 @@ export class BattleScene extends Phaser.Scene {
     });
     this.sideButton(1480, 540, 170, 54, '檢視牌組', 0x2c4a30, 0x5aa06a,
       () => new DeckOverlay(this, this.run, { mode: 'view', title: '目前牌組' }));
+  }
+
+  /** 精英/魔王大血條：固定在畫面正上方,鏡射王的血量（無王時隱藏）。 */
+  drawBossBar() {
+    const cx = HAND_CENTER_X;
+    const y = 78;
+    const w = 720;
+    this.bossBarW = w - 6;
+    this.bossBarBg = this.add.rectangle(cx, y, w, 30, 0x000000, 0.55).setDepth(5000);
+    this.bossBarFill = this.add.rectangle(cx - w / 2 + 3, y, w - 6, 22, 0xb03a3a).setOrigin(0, 0.5).setDepth(5001);
+    this.bossNameText = this.add
+      .text(cx, y - 27, '', { fontFamily: 'sans-serif', fontSize: '22px', color: '#f0c0b0', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setDepth(5002);
+    this.bossHpText = this.add
+      .text(cx, y, '', { fontFamily: 'sans-serif', fontSize: '15px', color: '#fff', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setDepth(5002);
+    this.bossBarObjs = [this.bossBarBg, this.bossBarFill, this.bossNameText, this.bossHpText];
+    this.setBossBarVisible(false);
+  }
+
+  setBossBarVisible(visible) {
+    for (const o of this.bossBarObjs ?? []) o.setVisible(visible);
+  }
+
+  updateBossBar() {
+    const boss = this.battle.formation?.living.find((e) => isBossDef(e.defId)) ?? null;
+    this.setBossBarVisible(Boolean(boss));
+    if (!boss) return;
+    const ratio = Math.max(0, boss.hp / boss.maxHp);
+    this.bossBarFill.setSize(Math.max(0.001, this.bossBarW * ratio), 22);
+    this.bossBarFill.fillColor = ratio > 0.5 ? 0xb03a3a : ratio > 0.25 ? 0xd9645c : 0x8a2020;
+    this.bossNameText.setText(getEnemyDef(boss.defId).name);
+    this.bossHpText.setText(`${boss.hp} / ${boss.maxHp}`);
   }
 
   sideButton(x, y, w, h, label, fill, border, onClick) {

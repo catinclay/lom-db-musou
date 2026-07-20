@@ -11,7 +11,14 @@ export const ENEMY_DEFS = {
   kuaiDao: enemy('kuaiDao', '快刀手', 0xb96d42),
   han: enemy('han', '大漢', 0x7a5aa0),
   dingZhuang: enemy('dingZhuang', '定樁力士', 0x4e7180),
+  touMu: enemy('touMu', '頭目', 0xb03a3a),
+  moWang: enemy('moWang', '魔王', 0x6a2ca0),
 };
+
+/** 是否為精英/魔王（大血條、遠程、finale 登場）。 */
+export function isBossDef(defId) {
+  return ENEMY_DEFS[defId]?.isBoss === true;
+}
 
 export const ENEMY_BUFF = { IMMOVABLE: 'immovable' };
 
