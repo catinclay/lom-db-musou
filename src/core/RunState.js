@@ -2,7 +2,7 @@ import { defaultRng } from './rng.js';
 import { TUNING } from '../config/tuning.js';
 import { RELIC_IDS, getRelicDef } from './RelicLibrary.js';
 import { EVENT_IDS, getEventDef } from './EventLibrary.js';
-import { getCardDef, CARD_TYPE, cardRarity, RARITY } from './CardLibrary.js';
+import { getCardDef, CARD_TYPE, cardRarity, RARITY, defIdsByRarity } from './CardLibrary.js';
 import { weightedPickDefId, rollAcquireRealm } from './rarity.js';
 
 /**
@@ -238,10 +238,20 @@ export class RunState {
       this.outcome = 'won';
       return { outcome: 'won', runOver: true, dayAdvanced: false, cleared: true, money };
     }
-    // 魔王（每 bossEveryDays 天）打贏給一件遺物
+    // 魔王（每 bossEveryDays 天）打贏給一件遺物 ＋ 一張絕學戰利品
     const relic = p.kind === 'boss' ? this.grantRandomRelic() : null;
+    const loot = p.kind === 'boss' ? this.grantBossLoot() : null;
     this.advanceDay();
-    return { outcome: 'won', runOver: false, dayAdvanced: true, money, relic };
+    return { outcome: 'won', runOver: false, dayAdvanced: true, money, relic, loot };
+  }
+
+  /** 魔王戰利品：習得一招絕學（依取得境界直接高境界）。@returns defId,或 null */
+  grantBossLoot() {
+    const pool = defIdsByRarity(RARITY.SIGNATURE);
+    if (!pool.length) return null;
+    const defId = weightedPickDefId(pool, this.rng, this.tuning);
+    this.acquireDeckCard(defId, this.rng);
+    return defId;
   }
 
   /** 推進到隔天（尾王打贏後）。 */

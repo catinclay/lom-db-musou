@@ -118,6 +118,17 @@ describe('牌組取得與參悟', () => {
   });
 });
 
+describe('魔王戰利品', () => {
+  it('grantBossLoot 習得一張絕學進牌組', () => {
+    const r = run();
+    const before = r.deck.length;
+    const defId = r.grantBossLoot();
+    expect(cardRarity(defId)).toBe(RARITY.SIGNATURE);
+    expect(r.deck.length).toBe(before + 1);
+    expect(cardRarity(r.deck.at(-1).defId)).toBe(RARITY.SIGNATURE);
+  });
+});
+
 describe('兩層境界:牌組境界 vs 戰鬥境界', () => {
   const noDrawMerge = { ...TUNING, mergeDraw: { baseChance: 0, decayPerMerge: 0, minChance: 0 } };
 

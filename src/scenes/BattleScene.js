@@ -3,6 +3,7 @@ import { BattleState } from '../core/BattleState.js';
 import { RunState } from '../core/RunState.js';
 import { EVENT } from '../core/events.js';
 import { getRelicDef } from '../core/RelicLibrary.js';
+import { getCardDef } from '../core/CardLibrary.js';
 import { DeckOverlay } from '../ui/DeckOverlay.js';
 import { HandView } from '../ui/HandView.js';
 import { MergeAnimator } from '../ui/MergeAnimator.js';
@@ -474,8 +475,13 @@ export class BattleScene extends Phaser.Scene {
         this.flash(`獲得遺物：${getRelicDef(res.relic).name}`, 0xb06cc0)
       );
     }
+    if (res.loot) {
+      this.time.delayedCall(Math.max(1, 900 / this.handView.speed), () =>
+        this.flash(`習得絕學：${getCardDef(res.loot).name}`, 0xf0c040)
+      );
+    }
 
-    this.time.delayedCall(Math.max(1, (res.relic ? 1500 : 800) / this.handView.speed), () => {
+    this.time.delayedCall(Math.max(1, (res.relic || res.loot ? 1600 : 800) / this.handView.speed), () => {
       if (res.runOver) {
         this.scene.start('Base', { run: this.run });
       } else if (res.dayAdvanced && this.run.slotTokens > 0) {
