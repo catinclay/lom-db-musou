@@ -188,8 +188,10 @@ export const TUNING = {
   run: {
     finalDay: 10,
     bossEveryDays: 3, // 第 3/6/9 天魔王
-    eventsPerDay: 10,
-    eliteInPoolChance: 0.25, // 白天池中「精英仇家」的比例
+    /** 白天＝一輪輪「三選一」：每輪擲 offer.size 個選項挑 1 個做，最多 maxRoundsPerDay 輪，隨時可入夜。 */
+    maxRoundsPerDay: 6,
+    offer: { size: 3, innChance: 0.14, eventChance: 0.42 }, // 其餘為 battle/elite（elite 吃 eliteInPoolChance）
+    eliteInPoolChance: 0.25,
     startMoney: 30,
     speedrunTokensPerSkipped: 1,
     dally: { wavesPerEvent: 0.5, eliteChancePerEvent: 0.03 },

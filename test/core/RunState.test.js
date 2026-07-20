@@ -10,7 +10,6 @@ describe('起始狀態', () => {
     expect(r.day).toBe(1);
     expect(r.hp).toBe(r.maxHp);
     expect(r.money).toBe(r.tuning.run.startMoney);
-    expect(r.dayPool).toHaveLength(r.tuning.run.eventsPerDay);
     expect(r.outcome).toBe('ongoing');
   });
 
@@ -31,56 +30,76 @@ describe('尾王節奏（殺戮尖塔式）', () => {
   });
 });
 
-describe('白天事件池', () => {
-  it('event 型節點回傳奇遇（延後到選項才結算）', () => {
+describe('白天：三選一 offer', () => {
+  it('rollOffer 擲出 offer.size 個選項', () => {
     const r = run();
-    const ev = r.dayPool.find((n) => n.kind === 'event');
-    const res = r.takeNode(ev.id);
-    expect(res.type).toBe('event');
-    expect(res.event.id).toBe(ev.eventId);
-    expect(ev.done).toBe(false); // 還沒選，尚未完成
+    r.rollOffer();
+    expect(r.offer).toHaveLength(r.tuning.run.offer.size);
   });
 
-  it('battle 型節點回傳戰鬥配置並設 pending', () => {
+  it('ensureOffer：沒 offer 才補；達當天上限則空', () => {
     const r = run();
-    const bn = r.dayPool.find((n) => n.kind === 'battle' || n.kind === 'elite');
-    const res = r.takeNode(bn.id);
+    r.ensureOffer();
+    expect(r.offer.length).toBe(3);
+    r.eventsDoneToday = r.tuning.run.maxRoundsPerDay; // 今天做滿
+    r.offer = null;
+    r.ensureOffer();
+    expect(r.offer).toHaveLength(0);
+  });
+
+  it('event 選項 → 回奇遇（延後結算），offer 消化掉', () => {
+    const r = run();
+    r.offer = [{ id: 'o', kind: 'event', eventId: 'baoXiang', done: false }];
+    const res = r.takeOffer(0);
+    expect(res.type).toBe('event');
+    expect(res.event.id).toBe('baoXiang');
+    expect(r.offer).toBeNull();
+  });
+
+  it('battle 選項 → 戰鬥配置並設 pending', () => {
+    const r = run();
+    r.offer = [{ id: 'o', kind: 'battle', done: false }];
+    const res = r.takeOffer(0);
     expect(res.type).toBe('battle');
     expect(res.config.hp).toBe(r.hp);
     expect(res.config).toHaveProperty('waves');
     expect(r.pending).not.toBeNull();
   });
 
-  it('inn 型節點回傳客棧貨架、計入當天事件、不設 pending', () => {
+  it('inn 選項 → 客棧貨架、計入當天、不設 pending', () => {
     const r = run();
-    const inn = r.dayPool.find((n) => n.kind === 'inn');
-    const res = r.takeNode(inn.id);
+    r.offer = [{ id: 'o', kind: 'inn', done: false }];
+    const res = r.takeOffer(0);
     expect(res.type).toBe('inn');
     expect(res.shop.cards.length).toBe(r.tuning.run.shop.cardCount);
-    expect(inn.done).toBe(true);
     expect(r.eventsDoneToday).toBe(1);
     expect(r.pending).toBeNull();
   });
 
-  it('已完成或不存在的節點回 null', () => {
+  it('index 無效回 null', () => {
     const r = run();
-    const n = r.dayPool[0];
-    n.done = true;
-    expect(r.takeNode(n.id)).toBeNull();
-    expect(r.takeNode('沒這節點')).toBeNull();
+    r.offer = [];
+    expect(r.takeOffer(0)).toBeNull();
+    r.offer = null;
+    expect(r.takeOffer(0)).toBeNull();
   });
 });
 
 describe('奇遇（EventLibrary）', () => {
-  it('每個 event 節點都帶 eventId', () => {
+  it('offer 的 event 選項都帶 eventId', () => {
     const r = run();
-    for (const n of r.dayPool.filter((n) => n.kind === 'event')) expect(n.eventId).toBeTruthy();
+    let found = 0;
+    for (let i = 0; i < 40; i++) {
+      r.offer = null;
+      r.rollOffer();
+      for (const n of r.offer) if (n.kind === 'event') { expect(n.eventId).toBeTruthy(); found++; }
+    }
+    expect(found).toBeGreaterThan(0);
   });
 
   it('立即事件：選項結算後標記完成、計入當天', () => {
     const r = run();
     const node = { id: 'ev-x', kind: 'event', eventId: 'baoXiang', done: false };
-    r.dayPool.push(node);
     r.rng = () => 0.1; // 寶箱開中（rng < 0.7）
     const res = r.resolveEventChoice(node, 0); // 撬開
     expect(res.text).toBeTruthy();
@@ -92,7 +111,6 @@ describe('奇遇（EventLibrary）', () => {
   it('戰鬥事件：設 pending、節點先不完成（交給戰後 finishBattle）', () => {
     const r = run();
     const node = { id: 'ev-y', kind: 'event', eventId: 'chouJia', done: false };
-    r.dayPool.push(node);
     const res = r.resolveEventChoice(node, 0); // 拔刀相向 → 戰鬥
     expect(res.battle).toBeTruthy();
     expect(node.done).toBe(false);
@@ -164,11 +182,11 @@ describe('尾王吃「拖延加成」（多農越硬）', () => {
 });
 
 describe('入夜召尾王 / 速通獎賞', () => {
-  it('還有沒做完的事件 ⇒ 按略過數發拉霸代幣', () => {
+  it('還沒做完的回合數 ⇒ 按略過數發拉霸代幣', () => {
     const r = run();
-    expect(r.remainingNodes).toHaveLength(10);
+    expect(r.roundsLeft).toBe(r.tuning.run.maxRoundsPerDay);
     const res = r.callBoss();
-    expect(res.speedrunTokens).toBe(10 * r.tuning.run.speedrunTokensPerSkipped);
+    expect(res.speedrunTokens).toBe(r.tuning.run.maxRoundsPerDay * r.tuning.run.speedrunTokensPerSkipped);
     expect(r.slotTokens).toBe(res.speedrunTokens);
     expect(r.pending.isBoss).toBe(true);
   });
@@ -177,8 +195,9 @@ describe('入夜召尾王 / 速通獎賞', () => {
 describe('戰後結算', () => {
   it('白天廝殺打贏：血量寫回、給銀兩、標記節點、計入當天事件數', () => {
     const r = run();
-    const bn = r.dayPool.find((n) => n.kind !== 'event');
-    r.takeNode(bn.id);
+    r.offer = [{ id: 'o', kind: 'battle', done: false }];
+    const bn = r.offer[0];
+    r.takeOffer(0);
     const res = r.finishBattle({ playerHp: 50, outcome: 'won' });
     expect(res).toMatchObject({ outcome: 'won', dayAdvanced: false });
     expect(bn.done).toBe(true);

@@ -5,7 +5,7 @@
 
 活俠傳同人遊戲 — Roguelike 牌組構築 ＋ 割草無雙。核心戰鬥（合成連鎖、境界連段、割草敵陣、
 附魔）已成形；**里程碑 3「江湖遠征」run 結構 Phase 1–5 全上線**（run loop、拉霸、客棧、遺物、奇遇、主角屬性、跨 run 據點 meta）——
-一天一池事件自由取捨、入夜打尾王，殺戮尖塔式節奏推進到最終魔王；一局結束回門派據點花威望做永久升級（見「§四·九 正式流程」）。
+一天一輪輪「三選一」抽事件、入夜打尾王，殺戮尖塔式節奏推進到最終魔王；一局結束回門派據點花威望做永久升級（見「§四·九 正式流程」）。
 
 ---
 
@@ -65,7 +65,7 @@
 | `core/Effect.js` | 把「定義＋境界＋連段」解算成實際傷害/護甲；卡面顯示數值。 | 改預設成長公式、改總傷計算、改卡面顯示的數字。 |
 | `core/MergeEngine.js` | **合成引擎**：同名自動合成（`resolveAutoMerges`）、忘形合成（`applyFormlessMerge`）、補抽機率（`drawChanceFor`）。產出劇本。 | 改合成規則、配對邏輯、補抽觸發、連鎖解算。 |
 | `core/ComboTracker.js` | 境界連段：出牌時累積 step、算倍率、`peek` 預覽。 | 改連段累積規則、中斷條件、倍率。 |
-| `core/RunState.js` | **一局江湖遠征的狀態機**（零 Phaser，run-meta 之上、BattleState 之下）：牌組跨戰保存、銀兩、主角血量、**主角屬性 `attrs`**（maxRealm/energyPerTurn/startingHandSize，可成長）、日程與事件池、尾王節奏（`dayBossKind`）、拖延加成（`battleConfig`）、速通拉霸代幣、遺物、`takeNode`/`callBoss`/`finishBattle`/`resolveEventChoice`；牌組編輯 `addDeckCard`/`removeDeckCard`/`enchantDeckCard`。`STARTING_DECK` 在這。 | 改 run 流程、每日事件池、尾王節奏/縮放、戰後結算、起始牌組、主角屬性、牌組增刪附魔。 |
+| `core/RunState.js` | **一局江湖遠征的狀態機**（零 Phaser，run-meta 之上、BattleState 之下）：牌組跨戰保存、銀兩、主角血量、**主角屬性 `attrs`**（maxRealm/energyPerTurn/startingHandSize，可成長）、日程與白天**三選一 offer**（`rollOffer`/`ensureOffer`/`takeOffer`）、尾王節奏（`dayBossKind`）、拖延加成（`battleConfig`）、速通拉霸代幣、遺物、`callBoss`/`finishBattle`/`resolveEventChoice`；牌組編輯 `addDeckCard`/`removeDeckCard`/`enchantDeckCard`。`STARTING_DECK` 在這。 | 改 run 流程、每日事件池、尾王節奏/縮放、戰後結算、起始牌組、主角屬性、牌組增刪附魔。 |
 | `core/slot.js` | **三輪連線拉霸**（零 Phaser）：`spinReels`/`resolveSlotReward`（三連大獎：金/葫→銀兩、劍→加攻擊牌、毒/火→牌組附魔、囧→槓龜；兩連/全不同→小銀兩）/`spinSlot`/`applySlotReward`。速通代幣消化，數值在 `tuning.run.slot`。 | 改拉霸符號權重、賠付、獎池、附魔目標。 |
 | `core/RelicLibrary.js` | **遺物·秘籍**定義（一局內被動加成）：`onAcquire(run)`（拿到即生效，如 +血量上限）、`battleMods`（每場疊 energy/handSize…）、`hooks`（`onBattleStart`/`onTurnStart`，收 battle 本體）。來源：魔王打贏＋客棧。持有存 `RunState.relics`（只存 id）。 | 新增/改遺物、加新的 hook 時機。 |
 | `core/EventLibrary.js` | **奇遇·江湖事件**定義（白天池 'event' 節點內容）：每個事件一段敘事 ＋ 選項，選項 `resolve(run, rng)` 就地改 run、回 `{ text }`（立即）或 `{ text, battle, battleKind }`（觸發戰鬥）。文案在這、數值在 `tuning.run.event`。首批：野菇/賭坊/仇家堵路/荒廟寶箱/雲遊郎中/高人指點。 | 新增/改奇遇、選項、結果。 |
@@ -106,7 +106,7 @@
 
 | 檔案 | 責任 | 動它的時機 |
 |------|------|-----------|
-| `scenes/RunMapScene.js` | **白天樞紐**：讀 RunState 畫出當天事件池（5×2 可點節點）＋ run HUD（天/血/銀兩/代幣）＋「入夜決戰」。點節點 → `takeNode`（開戰或立即結算）；入夜 → `callBoss`。 | 改地圖版面、節點外觀、入夜按鈕、run HUD。 |
+| `scenes/RunMapScene.js` | **白天樞紐**：`ensureOffer` 補一輪「三選一」→ 畫 3 張並排選項卡 ＋ run HUD（天/血/銀兩/代幣/屬性/遺物）＋「入夜決戰」。點卡 → `takeOffer(i)`（開戰/進奇遇/進客棧）；入夜 → `callBoss`。 | 改選項卡外觀、入夜按鈕、run HUD。 |
 | `scenes/BattleScene.js` | **單場戰鬥總指揮**：由 `scene.start('Battle',{run,config})` 進來，用 `run.deck`＋config 建 BattleState；接事件、協調演出、**抽牌批次化**、勝負判定後 `run.finishBattle` 並轉場（尾王贏且有代幣 → 先進 Slot）。 | 改戰鬥場景接線、抽牌批次、勝負轉場、背景與提示文字。 |
 | `scenes/ShopScene.js` | **客棧**：白天池 'inn' 節點進來，買招式（3 貨架）／歇息回血／刪去一招（點牌組選單）／拉霸。交易全走 `RunState`（`buyShopCard`/`restAtInn`/`buyRemoveCard`）。 | 改客棧版面、貨架、服務按鈕、刪牌選單。 |
 | `scenes/SlotScene.js` | **拉霸機**：花速通代幣拉三輪，演轉輪→`applySlotReward`。入夜打贏尾王（有代幣）自動進來、客棧也可進（帶 `back` 回客棧），離開回 RunMap。邏輯全在 `core/slot.js`。 | 改轉輪演出、按鈕、賠率小抄。 |
@@ -305,10 +305,10 @@
         └─ runOver → BaseScene（earnFromRun 賺威望、存檔）
 ```
 
-- **一天 = 一池事件**（`run.dayPool`，`tuning.run.eventsPerDay` 個）：玩家自由挑做。
-  `event` 型是**有分支選項的奇遇**（`EventScene`＋`EventLibrary`，選項可能加錢/附魔/回血/加牌/賭一把/開打）；
-  `battle`/`elite` 型開一場戰鬥；`inn` 型進客棧（買招/歇息/刪牌/拉霸/買遺物）。
-  每種都算一次「當天事件」（計入拖延）。做越多越強，但……
+- **一天 = 一輪輪「三選一」**（`run.offer`＝3 個選項，`rollOffer`/`takeOffer`；最多 `tuning.run.maxRoundsPerDay` 輪）：
+  每輪擲 3 個隨機選項挑 1 個做，做完補下一輪 —— 把「攤開 10 格最佳化」的策略負擔拆成一連串輕鬆的小挑選，也更鬧。
+  選項類別：**奇遇**（`event`，有分支選項 `EventScene`＋`EventLibrary`）、`battle`/`elite` 戰鬥、`inn` 客棧。
+  每做一樁算一次「當天事件」（計入拖延）。做越多越強，但……
 - **入夜召尾王**（`callBoss`）：尾王類別由 `dayBossKind` 決定 —— 平日 `elite`（小王）、
   每 `bossEveryDays` 天 `boss`（魔王）、第 `finalDay` 天 `final`（最終大魔王）。
 - **多農的取捨**：尾王吃「當天拖延加成」（`battleConfig` 的 `isBoss` 分支）——

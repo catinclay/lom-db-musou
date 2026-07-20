@@ -203,10 +203,12 @@ export class HandView {
    *   打得出、且 realm 大於目前連段境界（lastRealm，境界無當 0）的牌亮綠邊 —— 打它能續連段。
    */
   updateCardHints(lastRealm, energy) {
-    const floor = lastRealm ?? 0;
+    // 無境界（lastRealm null，回合開始/連段中斷後）不高光 —— 這時任何牌都能起手，
+    // 全部亮綠只是雜訊。只有「連段進行中」才點亮能續段（境界更高）的牌。
+    const inCombo = lastRealm != null;
     for (const s of this.sprites.values()) {
       const affordable = s.cost <= energy;
-      const canCombo = affordable && s.card.realm != null && s.card.realm > floor;
+      const canCombo = affordable && inCombo && s.card.realm != null && s.card.realm > lastRealm;
       s.setAffordable(affordable);
       s.setComboHint(canCombo);
     }

@@ -1,14 +1,13 @@
 import Phaser from 'phaser';
 import { RunState } from '../core/RunState.js';
 import { getRelicDef } from '../core/RelicLibrary.js';
+import { getEventDef } from '../core/EventLibrary.js';
 import { DeckOverlay } from '../ui/DeckOverlay.js';
 
 /**
  * 白天的江湖行程（run 的樞紐場景）。
- *   顯示 run 狀態（第幾天 / 血 / 銀兩 / 拉霸代幣），把當天事件池排成一格格可點的節點。
- *   點 battle/elite 節點 → 進 Battle 場景開戰；點 event 節點 → 立即結算獎勵、原地刷新。
- *   點「入夜決戰」→ 召尾王（提早入夜給速通拉霸代幣），進 Battle 打尾王。
- *
+ *   一輪「三選一」：擲 3 個選項給玩家挑 1 個做（battle/elite 開戰、event 進奇遇、inn 進客棧），
+ *   做完補下一輪，最多 maxRoundsPerDay 輪。隨時可「入夜決戰」召尾王（提早給速通代幣）。
  * 所有權威狀態都在 RunState；這裡只讀它、把玩家操作轉成 run 的方法呼叫。
  */
 const KIND_STYLE = {
@@ -54,10 +53,10 @@ export class RunMapScene extends Phaser.Scene {
     this.makeButton(200, 60, 210, 56, '檢視牌組', 0x2c4a30, 0x5aa06a,
       () => new DeckOverlay(this, this.run, { mode: 'view', title: '目前牌組' }));
 
-    if (data?.lastResult?.money) this.flash(`＋${data.lastResult.money} 銀兩`, 0xd9b45c);
+    this.run.ensureOffer(); // 補一輪三選一（達上限則空）
 
     this.renderHud();
-    this.renderPool();
+    this.renderOffer();
   }
 
   renderHud() {
@@ -66,9 +65,8 @@ export class RunMapScene extends Phaser.Scene {
     this.stats.setText(
       `主角 ${r.hp}/${r.maxHp}　　銀兩 ${r.money}　　拉霸代幣 ${r.slotTokens}`
     );
-    const done = r.dayPool.filter((n) => n.done).length;
     this.hint.setText(
-      `已探 ${done}/${r.dayPool.length} 個事件　（探得越多越強，但入夜尾王的敵潮也越大）`
+      `今日已探 ${r.eventsDoneToday} 樁（還可 ${r.roundsLeft} 樁）　挑一樁去做；探越多越強，但入夜尾王的敵潮也越大`
     );
     const bk = r.dayBossKind();
     this.bossTxt?.setText(`入夜決戰 — ${BOSS_LABEL[bk] ?? bk}`);
@@ -80,77 +78,76 @@ export class RunMapScene extends Phaser.Scene {
     this.relicText.setText(relics.length ? `遺物：${relics.join('　')}` : '遺物：（無）');
   }
 
-  /** 事件池排成 5×2 的格子，逐格可點。 */
-  renderPool() {
+  /** 本輪三選一：三張並排的選項卡，點一張去做。offer 為空（達上限）＝只能入夜。 */
+  renderOffer() {
     for (const o of this.nodeObjs) o.destroy();
     this.nodeObjs = [];
 
-    const cols = 5;
-    const cellW = 250;
-    const cellH = 150;
-    const gapX = 34;
-    const gapY = 40;
-    const rows = Math.ceil(this.run.dayPool.length / cols);
-    const gridW = cols * cellW + (cols - 1) * gapX;
-    const startX = 800 - gridW / 2 + cellW / 2;
-    const startY = 300;
+    const offer = this.run.offer ?? [];
+    if (!offer.length) {
+      this.nodeObjs.push(
+        this.add
+          .text(800, 460, '今日事件已盡 —— 該入夜決戰了。', {
+            fontFamily: 'sans-serif', fontSize: '26px', color: '#d9b45c', fontStyle: 'bold',
+          })
+          .setOrigin(0.5)
+      );
+      return;
+    }
 
-    this.run.dayPool.forEach((node, i) => {
-      const cx = startX + (i % cols) * (cellW + gapX);
-      const cy = startY + Math.floor(i / cols) * (cellH + gapY);
+    const cardW = 360;
+    const cardH = 300;
+    const gap = 60;
+    const totalW = offer.length * cardW + (offer.length - 1) * gap;
+    const startX = 800 - totalW / 2 + cardW / 2;
+    const y = 470;
+
+    offer.forEach((node, i) => {
+      const x = startX + i * (cardW + gap);
       const style = KIND_STYLE[node.kind] ?? KIND_STYLE.battle;
 
       const rect = this.add
-        .rectangle(cx, cy, cellW, cellH, node.done ? 0x241d17 : style.color, 1)
-        .setStrokeStyle(3, node.done ? 0x3a2f22 : style.border);
-      const txt = this.add
-        .text(cx, cy - 12, node.done ? '✓ 已探' : style.label, {
-          fontFamily: 'sans-serif',
-          fontSize: '26px',
-          color: node.done ? '#5a4a38' : '#f5e6c8',
-          fontStyle: 'bold',
-        })
+        .rectangle(x, y, cardW, cardH, style.color, 1)
+        .setStrokeStyle(4, style.border)
+        .setInteractive({ useHandCursor: true });
+      const title = this.add
+        .text(x, y - 70, this.offerTitle(node), { fontFamily: 'sans-serif', fontSize: '32px', color: '#f5e6c8', fontStyle: 'bold' })
         .setOrigin(0.5);
       const sub = this.add
-        .text(cx, cy + 30, node.done ? '' : this.nodeSubLabel(node), {
-          fontFamily: 'sans-serif',
-          fontSize: '15px',
-          color: node.done ? '#5a4a38' : '#d8c9a8',
+        .text(x, y + 30, this.offerSub(node), {
+          fontFamily: 'sans-serif', fontSize: '17px', color: '#e8dcc4', align: 'center', wordWrap: { width: cardW - 44 }, lineSpacing: 6,
         })
         .setOrigin(0.5);
 
-      if (!node.done) {
-        rect.setInteractive({ useHandCursor: true });
-        rect.on('pointerover', () => rect.setStrokeStyle(4, 0xffe1b0));
-        rect.on('pointerout', () => rect.setStrokeStyle(3, style.border));
-        rect.on('pointerdown', () => this.takeNode(node));
-      }
+      rect.on('pointerover', () => rect.setStrokeStyle(5, 0xffe1b0));
+      rect.on('pointerout', () => rect.setStrokeStyle(4, style.border));
+      rect.on('pointerdown', () => this.pick(i));
 
-      this.nodeObjs.push(rect, txt, sub);
+      this.nodeObjs.push(rect, title, sub);
     });
   }
 
-  nodeSubLabel(node) {
-    if (node.kind === 'event') return '（立即：獲得銀兩）';
+  offerTitle(node) {
+    if (node.kind === 'event') return getEventDef(node.eventId).name;
+    return KIND_STYLE[node.kind]?.label ?? '廝殺';
+  }
+
+  offerSub(node) {
+    if (node.kind === 'event') return '（奇遇 · 有選項）';
     if (node.kind === 'elite') return '（硬仗 · 較好報酬）';
-    if (node.kind === 'inn') return '（買招 · 歇息 · 拉霸）';
+    if (node.kind === 'inn') return '（買招 · 歇息 · 刪牌 · 拉霸）';
     return '（尋常廝殺）';
   }
 
-  takeNode(node) {
-    const res = this.run.takeNode(node.id);
+  pick(index) {
+    const res = this.run.takeOffer(index);
     if (!res) return;
     if (res.type === 'battle') {
       this.scene.start('Battle', { run: this.run, config: res.config });
-      return;
-    }
-    if (res.type === 'inn') {
+    } else if (res.type === 'inn') {
       this.scene.start('Shop', { run: this.run, shop: res.shop });
-      return;
-    }
-    if (res.type === 'event') {
+    } else if (res.type === 'event') {
       this.scene.start('Event', { run: this.run, node: res.node, event: res.event });
-      return;
     }
   }
 

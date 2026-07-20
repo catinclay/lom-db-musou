@@ -12,7 +12,7 @@ import { getCardDef, CARD_TYPE } from './CardLibrary.js';
  *   BattleState        單場戰鬥；每次由 RunState.battleConfig() 注入配置現生，戰後結果寫回。
  *
  * 一「天」的結構：
- *   白天 = 一池事件（dayPool），玩家自由挑著做（battle/elite 型開戰、event 型立即結算）。
+ *   白天 = 一輪輪「三選一」（offer）：每輪擲 3 個選項挑 1 個做，做完補下一輪，隨時可入夜。
  *   入夜 = callBoss() 召尾王（elite/boss/final，依 dayBossKind）。打贏 → 推進日程。
  *
  * 局內的境界合成照舊每場重置（BattleState 的事），RunState 不碰 —— 變強靠的是牌組/銀兩/遺物。
@@ -65,61 +65,69 @@ export class RunState {
     this.beginDay();
   }
 
-  /** 進入新的一天：day+1、重生事件池、當天計數歸零。 */
+  /** 進入新的一天：day+1、當天計數歸零、offer 待生（進 RunMap 時 rollOffer）。 */
   beginDay() {
     this.day += 1;
     this.eventsDoneToday = 0;
-    this.dayPool = this.generateDay(this.day);
+    this.offer = null;
   }
 
-  /** 生成當天的事件池：battle/elite 廝殺 + event 佔位事件 + inn 客棧交錯。 */
-  generateDay(day) {
-    const n = this.tuning.run.eventsPerDay;
-    const pool = [];
-    for (let i = 0; i < n; i++) {
-      let kind;
-      if (i > 0 && i % 4 === 0) kind = 'inn'; // 每 4 格一間客棧
-      else if (i % 3 === 2) kind = 'event';
-      else if (this.rng() < this.tuning.run.eliteInPoolChance) kind = 'elite';
-      else kind = 'battle';
-      const node = { id: `d${day}n${i}`, index: i, kind, done: false };
-      if (kind === 'event') node.eventId = EVENT_IDS[Math.floor(this.rng() * EVENT_IDS.length)];
-      pool.push(node);
+  /** 今天還能再做幾樁事件（達上限就只能入夜）。 */
+  get roundsLeft() {
+    return Math.max(0, this.tuning.run.maxRoundsPerDay - this.eventsDoneToday);
+  }
+
+  /** 確保有一輪可選的 offer（RunMap 進場呼叫）：沒了就補一輪，達上限則空。 */
+  ensureOffer() {
+    if (!this.offer) this.rollOffer();
+    return this.offer;
+  }
+
+  /** 生成一輪「三選一」的選項（達當天上限則空陣列）。 */
+  rollOffer() {
+    if (this.roundsLeft <= 0) {
+      this.offer = [];
+      return this.offer;
     }
-    return pool;
+    this.offer = Array.from({ length: this.tuning.run.offer.size }, (_, s) => this.rollNode(s));
+    return this.offer;
   }
 
-  get remainingNodes() {
-    return this.dayPool.filter((n) => !n.done);
-  }
-
-  node(id) {
-    return this.dayPool.find((n) => n.id === id);
+  /** 擲一個選項節點（隨機類別，event 再抽一個 eventId）。 */
+  rollNode(slot) {
+    const o = this.tuning.run.offer;
+    const x = this.rng();
+    let kind;
+    if (x < o.innChance) kind = 'inn';
+    else if (x < o.innChance + o.eventChance) kind = 'event';
+    else if (this.rng() < this.tuning.run.eliteInPoolChance) kind = 'elite';
+    else kind = 'battle';
+    const node = { id: `d${this.day}r${this.eventsDoneToday}s${slot}`, kind, done: false };
+    if (kind === 'event') node.eventId = EVENT_IDS[Math.floor(this.rng() * EVENT_IDS.length)];
+    return node;
   }
 
   /**
-   * 白天挑一個節點。
-   *   event 型 → 立即給獎、標記完成、回 { type:'reward' }。
-   *   battle/elite 型 → 設 pending，回 { type:'battle', kind, config } 交給場景開戰。
-   * @returns 結果物件，或 null（節點不存在／已完成）
+   * 從本輪 offer 選第 index 個去做。選了就把整輪消化掉（其餘作廢），下次進 RunMap 補新一輪。
+   *   event → { type:'event', event, node }（完成在 resolveEventChoice 才定）
+   *   inn   → 進客棧、計入當天，回 { type:'inn', shop }
+   *   battle/elite → 設 pending（done/count 交給戰後 finishBattle），回 { type:'battle', kind, config }
+   * @returns 結果，或 null（index 無效）
    */
-  takeNode(id) {
-    const node = this.node(id);
-    if (!node || node.done) return null;
+  takeOffer(index) {
+    const node = this.offer?.[index];
+    if (!node) return null;
+    this.offer = null; // 這一輪消化掉，其餘選項作廢
 
     if (node.kind === 'event') {
-      // 交給 EventScene 演敘事＋選項；完成與否在 resolveEventChoice 才定
       return { type: 'event', event: getEventDef(node.eventId), node };
     }
-
     if (node.kind === 'inn') {
-      // 客棧：進去就算花掉一段白天（計入拖延），店內買賣多次到離開為止
       node.done = true;
       this.eventsDoneToday += 1;
       node.shop = this.generateShop();
       return { type: 'inn', shop: node.shop };
     }
-
     this.pending = { node, kind: node.kind, isBoss: false };
     return { type: 'battle', kind: node.kind, config: this.battleConfig(node.kind, false) };
   }
@@ -165,7 +173,8 @@ export class RunState {
    */
   callBoss() {
     const kind = this.dayBossKind();
-    const tokens = this.remainingNodes.length * this.tuning.run.speedrunTokensPerSkipped;
+    // 速通：今天還沒做完的回合數 ＝ 略過的事件
+    const tokens = this.roundsLeft * this.tuning.run.speedrunTokensPerSkipped;
     this.slotTokens += tokens;
     this.pending = { node: null, kind, isBoss: true, tokensAwarded: tokens };
     return { type: 'battle', kind, config: this.battleConfig(kind, true), speedrunTokens: tokens };
