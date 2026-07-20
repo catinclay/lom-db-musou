@@ -141,6 +141,40 @@ export const TUNING = {
           buffCap: 2,
         },
       },
+
+      /**
+       * 精英/魔王（isBoss）：前面波次清完才登場（finale），視覺上鏡射一條大血條在畫面正上方。
+       *   attackRange：可在 rank ≤ N 就發動攻擊（雜兵省略＝0，只在接觸位打）。到達射程即停止前進。
+       *   specials：召喚/投射物/後退（Phase 2–3 加，資料驅動）。
+       * 頭目＝小王（精英戰）；魔王＝魔王/最終戰。
+       */
+      touMu: {
+        hp: 90,
+        damage: 14,
+        prepareTurns: 2,
+        attackRange: 1,
+        isBoss: true,
+        specials: [
+          { id: 'summon', type: 'summon', chance: 0.35, chargeTurns: 1, cooldownTurns: 2, summonDefId: 'luo', summonCount: 2 },
+        ],
+      },
+      moWang: {
+        hp: 180,
+        damage: 20,
+        prepareTurns: 2,
+        attackRange: 2,
+        isBoss: true,
+        specials: [
+          { id: 'summon', type: 'summon', chance: 0.35, chargeTurns: 1, cooldownTurns: 3, summonDefId: 'kuaiDao', summonCount: 3 },
+          // 投射物：只在遠距離（rank ≥ minRank）施放；投射物每次「出牌」前進一格,碰玩家造成 projDamage。
+          { id: 'projectile', type: 'projectile', chance: 0.45, chargeTurns: 1, cooldownTurns: 2, minRank: 2, projDamage: 10 },
+          // 後退：玩家逼近（rank ≤ maxRankToTrigger）時拉開距離。
+          { id: 'retreat', type: 'retreat', chance: 0.5, chargeTurns: 0, cooldownTurns: 2, steps: 1, maxRankToTrigger: 1 },
+        ],
+      },
+
+      /** 投射物：以「1 滴血的敵人」存在,可被玩家攻擊打掉；每次出牌前進,碰玩家造成傷害後消失。 */
+      projectile: { hp: 1, damage: 10, prepareTurns: 0 },
     },
 
     /**
@@ -228,15 +262,32 @@ export const TUNING = {
     speedrunTokensPerSkipped: 1,
     dally: { wavesPerEvent: 0.5, eliteChancePerEvent: 0.03 },
     battle: {
-      battle: { waves: 2, rows: 3, eliteChance: 0.12 }, // 尋常廝殺
-      elite: { waves: 3, rows: 3, eliteChance: 0.4 }, // 精英 / 小王
-      boss: { waves: 4, rows: 4, eliteChance: 0.6 }, // 魔王
-      final: { waves: 6, rows: 4, eliteChance: 0.85 }, // 最終大魔王
+      battle: { waves: 2, rows: 3, eliteChance: 0.12 }, // 尋常廝殺（無王）
+      elite: { waves: 3, rows: 3, eliteChance: 0.4, bossDefId: 'touMu' }, // 精英 / 小王
+      boss: { waves: 4, rows: 4, eliteChance: 0.6, bossDefId: 'moWang' }, // 魔王
+      final: { waves: 6, rows: 4, eliteChance: 0.85, bossDefId: 'moWang' }, // 最終大魔王
     },
     reward: { battle: 6, elite: 12, boss: 25, final: 0 },
 
     /** 跨 run 的「門派威望」（Phase 5）：run 結束依撐到第幾天 ＋ 通關獎勵賺取，回據點花在永久升級。 */
     meta: { prestigePerDay: 3, winBonus: 25 },
+
+    /**
+     * 稀有度（稀有武功/絕學）。只影響「取得」——不改境界機制。
+     *   weights       從混合卡池加權挑一張時，各稀有度的權重（絕學越稀有）。
+     *   acquireRealm  取得時擲的境界範圍 [lo, hi]（含端點，會再夾 attrs.maxRealm）。
+     *                 稀有/絕學「一入手就較高境界」,順帶拉高附魔上限（enchantCap=2^(realm-1)）。
+     *   shopRareChance 商店每格貨架改抽「稀有以上」卡池的機率（否則走普通池）。
+     *   rarePriceMult 稀有/絕學貨架的加價倍率。
+     *   parseCost     參悟服務：把牌組某張牌的境界永久 +1（一輪內、跨戰保存）的花費。
+     */
+    rarity: {
+      weights: { common: 70, rare: 24, signature: 6 },
+      acquireRealm: { common: [1, 1], rare: [2, 3], signature: [3, 5] },
+      shopRareChance: 0.3,
+      rarePriceMult: 1.9,
+      parseCost: 40,
+    },
 
     /** 奇遇（EventLibrary）的經濟/風險數值。內容（文案、選項）在 core/EventLibrary.js。 */
     event: {
@@ -251,6 +302,8 @@ export const TUNING = {
       cardPrice: 18, // 郎中傳一招
       trainCost: 30, // 高人指點：練內力/起手張數
       realmCost: 55, // 高人指點：悟境界上限（較貴）
+      manualCost: 45, // 祕笈殘卷：參詳習得一招絕學（signature）
+      manualSell: 20, // 祕笈殘卷：變賣換銀兩
     },
 
     /**
@@ -281,6 +334,8 @@ export const TUNING = {
     shop: {
       cardCount: 3,
       cardPool: ['hengPi', 'guan', 'anqi', 'bengShan', 'duWu', 'huoYao', 'yunQi', 'linJi', 'wangXing'],
+      /** 稀有以上的專屬貨架卡池（shopRareChance 命中時從這裡挑）。 */
+      rareCardPool: ['huiLongJian', 'dianPoYunGuan'],
       cardPrice: { min: 14, max: 26 },
       removePrice: 20,
       relicPrice: 45,

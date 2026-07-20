@@ -36,3 +36,22 @@
   → 再跑手牌 `endTurn()`（棄牌 + 新回合抽牌/合成）。
 - **主角血量/護甲**：`playerHp`；護甲（`armor`）是「格擋」，每回合 `startTurn` 重置，敵人攻擊時先扣護甲再扣血。
 - **視覺與說明**：core 只出狀態與事件（`ENEMIES_HIT`/`ENEMIES_ADVANCED`/`PLAYER_HIT`），`FormationView` 用 `perspective.project()` 投影。敵人頭上只顯示攻擊／特殊行動意圖；hover 會列出敵種、攻擊準備、下回合意圖與身上所有狀態／buff 說明。core 零 Phaser 的分層照舊。
+
+## 精英／魔王（boss）
+
+具名王單位（`touMu` 頭目＝精英、`moWang` 魔王；`isBoss` in `EnemyLibrary`／`tuning.combat.enemies`），
+`RunState` 依戰鬥類別（elite/boss/final）注入 `battleConfig.bossDefId`。
+
+- **登場（finale）**：正常補充波（`wavesLeft`）清完後才從最後方走入（`BattleState.maybeSpawnBoss`）。
+  王未登場／未死不判勝（`hasPendingBoss` 併入 `checkOutcome`）。尋常廝殺無王（`bossDefId` 省略 ⇒ 行為照舊）。
+- **大血條**：`BattleScene` 在畫面正上方鏡射王的血量（`drawBossBar`/`updateBossBar`）；王剪影放大、頭頂小血條隱藏。
+- **攻擊距離**：`def.attackRange`（雜兵省略＝0，只在 rank 0 近戰）。`Formation.inAttackRange` 一般化了原本
+  硬綁 rank 0 的攻擊準備／前進；遠程王在 `rank ≤ attackRange` 就備戰、到達射程即停止前進。
+- **特殊行動**（`specials` 陣列，資料驅動；`Formation.applySpecial` 依 `type` 分派）：
+  - `buff`（扎馬取得不動，定樁力士；行為不變）
+  - `summon`：在王前方最近空排放一排小兵（`summonAt`）。
+  - `retreat`：玩家逼近（`maxRankToTrigger`）時後退一格拉開距離（`retreatEnemy`）。
+  - `projectile`：只在遠距離（`minRank`）施放。投射物以「1 滴血的敵人」存在（`createProjectile`，`isProjectile`），
+    **每次「出牌」前進一格**（`BattleState.advanceProjectiles`，非敵方相位）；越過最前線即扣玩家血後消失；
+    因是 formation 內的單位,玩家攻擊天生就能鎖定把它打掉。
+  - 每個 special 各自 `chargeTurns`（預告蓄力）與 `cooldownTurns`（`specialCooldowns` 逐 id 記）。

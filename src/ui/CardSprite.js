@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
-import { getCardDef } from '../core/CardLibrary.js';
+import { getCardDef, cardRarity } from '../core/CardLibrary.js';
 import { isFormless, displayName, cardEnchants } from '../core/Card.js';
 import { STATUS_DEFS, STATUS_IDS } from '../core/StatusLibrary.js';
 import { cardFaceValue } from '../core/Effect.js';
-import { realmLabel, CARD_COLORS, FORMLESS_COLOR } from './format.js';
+import { realmLabel, CARD_COLORS, FORMLESS_COLOR, RARITY_COLORS } from './format.js';
 import { cardTextureKey, HIGHLIGHT_KEY, ensureEnchantTexture } from './cardTextures.js';
 import { TUNING } from '../config/tuning.js';
 
@@ -18,6 +18,11 @@ export class CardSprite extends Phaser.GameObjects.Container {
     this.card = card;
     this.w = TUNING.hand.cardWidth;
     this.h = TUNING.hand.cardHeight;
+
+    // 稀有度光框：稀有/絕學卡常亮一圈彩邊（在卡底圖後面，只露出邊框）。放最底層,
+    // 讓連段/忘形高亮仍能疊在其上。
+    this.rarityGlow = scene.add.image(0, 0, HIGHLIGHT_KEY).setVisible(false);
+    this.add(this.rarityGlow);
 
     // 綠色連段提示光暈：打這張能繼續 combo 時亮起（在卡底圖後面，只露出邊框）
     this.comboGlow = scene.add.image(0, 0, HIGHLIGHT_KEY).setVisible(false).setTint(0x8fd06a);
@@ -100,6 +105,10 @@ export class CardSprite extends Phaser.GameObjects.Container {
     this.cost = def.cost;
     const formless = isFormless(card);
     const colors = CARD_COLORS[def.type];
+
+    const rarityColor = RARITY_COLORS[cardRarity(card.defId)];
+    this.rarityGlow.setVisible(rarityColor != null);
+    if (rarityColor != null) this.rarityGlow.setTint(rarityColor);
 
     this.bg.setTexture(cardTextureKey(def.type, formless));
     this.nameText.setText(displayName(card));

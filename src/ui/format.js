@@ -20,3 +20,17 @@ export const CARD_COLORS = {
 };
 
 export const FORMLESS_COLOR = 0xd9b45c;
+
+/** 稀有度框色（普通不加框）。key 對齊 core 的 RARITY 值。 */
+export const RARITY_COLORS = {
+  common: null,
+  rare: 0x4a8fb8, // 稀有：藍
+  signature: 0xf0c040, // 絕學：金
+};
+
+/** 稀有度中文標籤（普通不標）。 */
+export const RARITY_LABEL = {
+  common: '',
+  rare: '稀有',
+  signature: '絕學',
+};

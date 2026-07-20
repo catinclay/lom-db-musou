@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import { RunState } from '../core/RunState.js';
-import { getCardDef } from '../core/CardLibrary.js';
+import { getCardDef, cardRarity } from '../core/CardLibrary.js';
 import { getRelicDef } from '../core/RelicLibrary.js';
 import { DeckOverlay } from '../ui/DeckOverlay.js';
+import { realmLabel, RARITY_LABEL, RARITY_COLORS } from '../ui/format.js';
 
 /**
  * 客棧（白天池中的 'inn' 節點）：買招式、歇息回血、刪去一招，也能拉霸。
@@ -32,15 +33,18 @@ export class ShopScene extends Phaser.Scene {
     this.add.text(800, 210, '買招式', { fontFamily: 'sans-serif', fontSize: '20px', color: '#9c8a70' }).setOrigin(0.5);
 
     // 服務列（建一次，refresh 只調可用度）
-    this.restBtn = this.makeButton(430, 660, 260, 66,
+    this.restBtn = this.makeButton(360, 660, 236, 66,
       `歇息回血（−${this.shop.rest.price}，＋${this.shop.rest.heal}）`, 0x24445c, 0x4a8fb8,
       () => this.doRest());
-    this.removeBtn = this.makeButton(720, 660, 240, 66,
+    this.parseBtn = this.makeButton(618, 660, 220, 66,
+      `參悟武學（−${this.run.tuning.run.rarity.parseCost}）`, 0x2c4a30, 0x5aa06a,
+      () => this.openParsePicker());
+    this.removeBtn = this.makeButton(858, 660, 220, 66,
       `刪去一招（−${this.shop.removePrice}）`, 0x5c2c2c, 0xc4583f,
       () => this.openRemovePicker());
-    this.slotBtn = this.makeButton(985, 660, 200, 66, '拉霸機 🎰', 0x4a2c5c, 0x9b6cc0,
+    this.slotBtn = this.makeButton(1082, 660, 180, 66, '拉霸機 🎰', 0x4a2c5c, 0x9b6cc0,
       () => this.goSlot());
-    this.makeButton(1210, 660, 160, 66, '離開', 0x3a2f22, 0xd9b45c, () => this.leave());
+    this.makeButton(1266, 660, 150, 66, '離開', 0x3a2f22, 0xd9b45c, () => this.leave());
 
     this.viewBtn = this.makeButton(230, 130, 200, 52, '檢視牌組', 0x2c4a30, 0x5aa06a,
       () => new DeckOverlay(this, this.run, { mode: 'view', title: '目前牌組' }));
@@ -57,6 +61,7 @@ export class ShopScene extends Phaser.Scene {
     this.status.setText(`銀兩 ${r.money}　　血量 ${r.hp}/${r.maxHp}　　代幣 ${r.slotTokens}`);
     this.restBtn.setAlpha(r.money >= this.shop.rest.price && r.hp < r.maxHp ? 1 : 0.45);
     this.removeBtn.setAlpha(r.money >= this.shop.removePrice && r.deck.length > 1 ? 1 : 0.45);
+    this.parseBtn.setAlpha(r.money >= r.tuning.run.rarity.parseCost ? 1 : 0.45);
     this.renderOffers();
     this.renderRelicOffer();
   }
@@ -109,10 +114,23 @@ export class ShopScene extends Phaser.Scene {
       const y = 360;
       const def = getCardDef(offer.defId);
       const affordable = !offer.sold && this.run.money >= offer.price;
+      const rarity = cardRarity(offer.defId);
+      const rarityColor = RARITY_COLORS[rarity];
+      const borderColor = offer.sold ? 0x3a2f22 : rarityColor ?? 0xd9b45c;
 
       const rect = this.add
         .rectangle(x, y, 300, 250, offer.sold ? 0x241d17 : 0x2a221a)
-        .setStrokeStyle(3, offer.sold ? 0x3a2f22 : 0xd9b45c);
+        .setStrokeStyle(rarityColor && !offer.sold ? 4 : 3, borderColor);
+      // 稀有度＋取得境界標籤（普通卡不標稀有度）
+      const tagParts = [];
+      if (RARITY_LABEL[rarity]) tagParts.push(RARITY_LABEL[rarity]);
+      if ((offer.realm ?? 1) > 1) tagParts.push(`境界${realmLabel(offer.realm)}`);
+      const tag = this.add
+        .text(x, y - 112, tagParts.join('　'), {
+          fontFamily: 'sans-serif', fontSize: '17px',
+          color: offer.sold ? '#5a4a38' : rarityColor ? '#f0dda0' : '#9c8a70', fontStyle: 'bold',
+        })
+        .setOrigin(0.5);
       const name = this.add
         .text(x, y - 88, def.name, { fontFamily: 'sans-serif', fontSize: '30px', color: offer.sold ? '#5a4a38' : '#f5e6c8', fontStyle: 'bold' })
         .setOrigin(0.5);
@@ -132,10 +150,10 @@ export class ShopScene extends Phaser.Scene {
       if (!offer.sold) {
         rect.setInteractive({ useHandCursor: true });
         rect.on('pointerover', () => rect.setStrokeStyle(4, 0xffe1b0));
-        rect.on('pointerout', () => rect.setStrokeStyle(3, 0xd9b45c));
+        rect.on('pointerout', () => rect.setStrokeStyle(rarityColor ? 4 : 3, borderColor));
         rect.on('pointerdown', () => this.buy(i));
       }
-      this.offerObjs.push(rect, name, desc, price);
+      this.offerObjs.push(rect, tag, name, desc, price);
     });
   }
 
@@ -164,6 +182,23 @@ export class ShopScene extends Phaser.Scene {
       confirmLabel: '刪去',
       onConfirm: (index) => {
         if (this.run.buyRemoveCard(this.shop, index)) this.flash('刪去一招');
+        this.refresh();
+      },
+    });
+  }
+
+  // ── 參悟：開牌組浮層,選一張、確認後把它的境界永久 +1（一輪內跨戰保存）──
+  openParsePicker() {
+    const cost = this.run.tuning.run.rarity.parseCost;
+    if (this.run.money < cost) { this.flash('銀兩不足'); return; }
+    new DeckOverlay(this, this.run, {
+      mode: 'select',
+      title: `參悟哪一招？境界 +1（−${cost} 銀兩）`,
+      confirmLabel: '參悟',
+      onConfirm: (index) => {
+        const realm = this.run.buyParseCard(index);
+        if (realm == null) this.flash('已達境界上限或銀兩不足');
+        else this.flash(`【${getCardDef(this.run.deck[index].defId).name}】悟至境界${realmLabel(realm)}`);
         this.refresh();
       },
     });

@@ -15,7 +15,9 @@ export class EnemySprite extends Phaser.GameObjects.Container {
     const def = getEnemyDef(enemy.defId);
 
     this.tint = def.tint;
+    this.isBoss = def.isBoss === true;
     this.body = scene.add.image(0, 0, ENEMY_TEX).setOrigin(0.5, 1).setTint(def.tint);
+    if (this.isBoss) this.body.setScale(1.6); // 精英/魔王剪影更大,凸顯是特殊敵人
     this.add(this.body);
 
     // 攻擊意圖：準備中黃！＋剩餘回合；完成後紅！，代表下回合攻擊。
@@ -68,8 +70,9 @@ export class EnemySprite extends Phaser.GameObjects.Container {
     const r = Math.max(0, this.enemy.hp / this.enemy.maxHp);
     this.hpFill.setSize(Math.max(0.001, 70 * r), 7); // setSize 才會重建幾何
     this.hpFill.fillColor = r > 0.5 ? 0x8fd06a : r > 0.25 ? 0xd9b45c : 0xc4583f;
-    this.hpFill.setVisible(r > 0 && r < 1);
-    this.hpBg.setVisible(r > 0 && r < 1);
+    // 王的血量看畫面正上方的大血條,頭頂小血條隱藏免得重複。
+    this.hpFill.setVisible(!this.isBoss && r > 0 && r < 1);
+    this.hpBg.setVisible(!this.isBoss && r > 0 && r < 1);
 
     const charging = this.enemy.attackState === 'charging';
     const ready = this.enemy.attackState === 'ready';
@@ -80,9 +83,10 @@ export class EnemySprite extends Phaser.GameObjects.Container {
       .setVisible(charging);
     this.body.setTint(ready ? 0xff5a3c : this.tint);
 
-    const special = this.enemy.rank > 0 && this.enemy.intent?.id === 'brace';
-    this.specialWarn.setVisible(special);
-    this.specialLabel.setVisible(special);
+    const intentId = this.enemy.rank > 0 ? this.enemy.intent?.id : null;
+    const intentLabel = { brace: '扎馬', summon: '召喚', projectile: '施法', retreat: '後退' }[intentId];
+    this.specialWarn.setVisible(Boolean(intentLabel));
+    this.specialLabel.setText(intentLabel ?? '').setVisible(Boolean(intentLabel));
 
     const active = [
       ...activeStatuses(this.enemy).map((id) => ({ id, stacks: this.enemy.statuses[id], def: STATUS_DEFS[id] })),

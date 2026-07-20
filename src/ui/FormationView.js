@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { project, depthFor } from './perspective.js';
 import { EnemySprite } from './EnemySprite.js';
 import { STATUS_DEFS, activeStatuses } from '../core/StatusLibrary.js';
-import { ENEMY_BUFF_DEFS, activeEnemyBuffs, getEnemyDef } from '../core/EnemyLibrary.js';
+import { ENEMY_BUFF_DEFS, activeEnemyBuffs, getEnemyDef, enemySpecials } from '../core/EnemyLibrary.js';
 import { TUNING } from '../config/tuning.js';
 import { tweenTo } from './tweens.js';
 
@@ -392,9 +392,17 @@ export class FormationView {
       const s = this.sprites.get(action.uid);
       if (!s || !s.active) continue;
       s.refresh();
+      const spec =
+        action.type === 'summon'
+          ? { text: `召喚 ＋${action.summoned}`, color: '#e0a0f0' }
+          : action.type === 'retreat'
+            ? { text: '後退', color: '#c9a8e0' }
+            : action.type === 'projectile'
+              ? { text: '施法', color: '#e0d060' }
+              : { text: `不動 ＋${action.added}`, color: '#9fd0e8' };
       const label = this.scene.add
-        .text(s.x, s.y - 185 * s.scaleY, `不動 ＋${action.added}`, {
-          fontFamily: 'sans-serif', fontSize: '20px', color: '#9fd0e8', fontStyle: 'bold',
+        .text(s.x, s.y - 185 * s.scaleY, spec.text, {
+          fontFamily: 'sans-serif', fontSize: '20px', color: spec.color, fontStyle: 'bold',
         })
         .setOrigin(0.5)
         .setDepth(7000);
@@ -445,9 +453,11 @@ export class FormationView {
   intentDescription(enemy) {
     if (enemy.attackState === 'ready') return `下回合攻擊，造成 ${enemy.damage} 傷害`;
     if (enemy.attackState === 'charging') return `準備攻擊，剩 ${enemy.prepareRemaining} 回合`;
-    if (enemy.intent?.id === 'brace') {
-      const special = getEnemyDef(enemy.defId).special;
-      return `下回合扎馬：不前進並獲得不動 ${special?.buffStacks ?? 0}`;
+    if (enemy.intent) {
+      const sp = enemySpecials(getEnemyDef(enemy.defId)).find((s) => s.id === enemy.intent.id);
+      if (enemy.intent.id === 'brace') return `下回合扎馬：不前進並獲得不動 ${sp?.buffStacks ?? 0}`;
+      if (sp?.type === 'summon') return `下回合召喚 ${sp.summonCount ?? 2} 名小兵`;
+      if (sp?.type === 'retreat') return '下回合後退,拉開距離';
     }
     return '前進（移動意圖不顯示於頭頂）';
   }

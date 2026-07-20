@@ -11,7 +11,24 @@ export const ENEMY_DEFS = {
   kuaiDao: enemy('kuaiDao', '快刀手', 0xb96d42),
   han: enemy('han', '大漢', 0x7a5aa0),
   dingZhuang: enemy('dingZhuang', '定樁力士', 0x4e7180),
+  touMu: enemy('touMu', '頭目', 0xb03a3a),
+  moWang: enemy('moWang', '魔王', 0x6a2ca0),
+  projectile: enemy('projectile', '勁氣', 0xe0d060),
 };
+
+/** 是否為精英/魔王（大血條、遠程、finale 登場）。 */
+export function isBossDef(defId) {
+  return ENEMY_DEFS[defId]?.isBoss === true;
+}
+
+/**
+ * 一種敵人的特殊行動清單。相容舊的單一 `special`（定樁力士）與新的 `specials` 陣列（王）。
+ * 每個 special：{ id, type?, chance, chargeTurns, cooldownTurns, ...型別參數 }。
+ *   type 省略但帶 buffId ＝ 疊 buff（如扎馬取得不動）；'summon'/'retreat'/'projectile' 見 Formation。
+ */
+export function enemySpecials(def) {
+  return def.specials ?? (def.special ? [def.special] : []);
+}
 
 export const ENEMY_BUFF = { IMMOVABLE: 'immovable' };
 

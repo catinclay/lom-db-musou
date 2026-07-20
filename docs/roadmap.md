@@ -37,6 +37,16 @@
 
 完成規格見 [plans/dot-status-scaling.md](plans/dot-status-scaling.md) 與 [plans/enemy-intents-and-wave-flow.md](plans/enemy-intents-and-wave-flow.md)。
 
+## 近期完成（稀有度／絕學卡 ＋ 精英／魔王）
+
+- **稀有度／絕學卡**：三階稀有度（普通/稀有/絕學），稀有度只影響取得、不改境界機制。稀有/絕學卡
+  取得時直接帶較高境界（`spec.realm`，一輪內跨戰保存）；商店稀有貨架、專屬奇遇「祕笈殘卷」、
+  拉霸/郎中傳招、魔王戰利品皆走稀有度加權取得。新增「參悟武學」客棧服務（牌組某張境界永久 +1）。
+  詳見 [systems/merge.md](systems/merge.md) 的「稀有度與牌組境界」。
+- **精英／魔王**：具名王單位（頭目/魔王），正常波清完後 finale 登場、畫面正上方大血條、更長攻擊
+  距離、召喚小兵、後退拉距，以及「每次出牌前進、可被打掉」的投射物。詳見
+  [systems/combat.md](systems/combat.md) 的「精英／魔王」。
+
 ## 接下來
 
 **內容擴充與實機調平衡**，非新架構：觀察敵人準備時間、扎馬機率、每排 2–4 人與清場獎勵的實際壓力，再擴充更多卡／敵／遺物／奇遇／據點升級。數值都在 `tuning`。

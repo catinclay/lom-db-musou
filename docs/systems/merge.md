@@ -51,3 +51,15 @@
 
 出牌時會先 tick 敵人身上的既有狀態，再套用本張牌的自身狀態與附魔；因此剛施加的層數當次不會立刻衰減
 或成長，敵人頭上會先顯示與卡面一致的完整層數。
+
+## 稀有度與「牌組境界」（稀有武功/絕學）
+
+**稀有度**（`RARITY` in `CardLibrary.js`：`common`/`rare`/`signature`(絕學)）**只影響取得**，不碰境界機制：每張卡一律支援境界一〜五。
+- def 標 `rarity`（未標＝普通）；`cardRarity(defId)`/`defIdsByRarity(rarity)` 查詢。
+- **取得管道加權**（`core/rarity.js`）：`weightedPickDefId` 依稀有度權重挑卡（絕學越稀有），`rollAcquireRealm` 依稀有度擲「取得境界」（夾主角 `attrs.maxRealm`）。商店有稀有貨架（`shopRareChance`）、專屬奇遇「祕笈殘卷」給絕學、拉霸/郎中傳招也走加權。數值在 `tuning.run.rarity`。
+- 稀有/絕學卡**照常參與同名自動合成**（規則不變）。
+
+**兩層境界**（原本就是架構，稀有度只是讓它更常被用到）：
+- **牌組境界** ＝ `RunState.deck` 的 `spec.realm`，玩家實際擁有的境界，**一輪內跨戰保存**。只被**戰鬥外**調整改動：取得時就帶高境界（`addDeckCard`/`acquireDeckCard`）、或參悟服務 +1（`upgradeDeckCardRealm`/客棧 `buyParseCard`，`tuning.run.rarity.parseCost`）。
+- **戰鬥境界** ＝ `BattleState.start` 由 spec **複製**出的實例（`realm: spec.realm ?? 1`）。戰鬥內合成/忘形只改複本，**戰鬥結束丟棄、永不寫回牌組**。→「戰鬥內取得的境界不保存」自動成立。
+- **新 run** 由 `STARTING_DECK` 重建；先前取得的卡與其境界都不帶過去。

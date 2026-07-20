@@ -1,4 +1,4 @@
-import { ENEMY_BUFF, getEnemyDef } from './EnemyLibrary.js';
+import { ENEMY_BUFF, getEnemyDef, enemySpecials } from './EnemyLibrary.js';
 import { defaultRng } from './rng.js';
 
 /**
@@ -33,10 +33,21 @@ export function createEnemy(defId, rank, lane) {
     attackState: 'none', // none | charging（黃！）| ready（紅！；下回合攻擊）
     prepareRemaining: 0,
     intent: null, // 距離外的特殊行動預告，如 { id:'brace', remaining:1 }
-    specialCooldown: 0,
+    specialCooldowns: {}, // 每個 special id 各自的冷卻回合
     statuses: {},
     buffs: def.initialImmovable ? { [ENEMY_BUFF.IMMOVABLE]: def.initialImmovable } : {},
   };
+}
+
+/**
+ * 生成一枚投射物（以「1 滴血的敵人」存在,好讓玩家的攻擊天生就能鎖定打掉它）。
+ * 不隨敵方相位移動、不備戰;靠 Formation.advanceProjectiles 在每次出牌時前進、命中玩家。
+ */
+export function createProjectile(rank, lane, damage) {
+  const e = createEnemy('projectile', rank, lane);
+  e.isProjectile = true;
+  e.damage = damage;
+  return e;
 }
 
 export class Formation {
@@ -170,14 +181,22 @@ export class Formation {
     return false;
   }
 
-  /** 已完成準備、在接觸位（rank 0）的活敵人攻擊力總和。 */
+  /**
+   * 該敵人是否已進入攻擊射程。雜兵射程 0（只在接觸位 rank 0 攻擊）；
+   * 精英/魔王的 def.attackRange > 0 可在較遠的 rank 就攻擊，並在到達射程後停止前進。
+   */
+  inAttackRange(enemy) {
+    return enemy.rank <= (getEnemyDef(enemy.defId).attackRange ?? 0);
+  }
+
+  /** 已完成準備、在射程內的活敵人攻擊力總和。 */
   contactDamage() {
-    return this.living.filter((e) => e.rank === 0 && e.attackState === 'ready').reduce((s, e) => s + e.damage, 0);
+    return this.living.filter((e) => this.inAttackRange(e) && e.attackState === 'ready').reduce((s, e) => s + e.damage, 0);
   }
 
   /** 取出本回合攻擊者，並讓它們攻擊後重新從完整準備回合開始。 */
   consumeContactAttacks() {
-    const attackers = this.living.filter((e) => e.rank === 0 && e.attackState === 'ready');
+    const attackers = this.living.filter((e) => this.inAttackRange(e) && e.attackState === 'ready');
     for (const e of attackers) this.beginAttackPreparation(e);
     return attackers;
   }
@@ -196,7 +215,8 @@ export class Formation {
   /** 已在攻擊線的敵人推進一格準備：黃 2 → 黃 1 → 紅。 */
   progressContactPreparation(skip = new Set()) {
     for (const e of this.living) {
-      if (e.rank !== 0 || e.attackState !== 'charging' || skip.has(e.uid)) continue;
+      if (e.isProjectile) continue;
+      if (!this.inAttackRange(e) || e.attackState !== 'charging' || skip.has(e.uid)) continue;
       e.prepareRemaining = Math.max(0, e.prepareRemaining - 1);
       if (e.prepareRemaining === 0) e.attackState = 'ready';
     }
@@ -205,13 +225,18 @@ export class Formation {
   /** 新進攻擊線者開始完整準備；被推出攻擊線者清空進度。 */
   initializeContactPreparation() {
     for (const e of this.living) {
-      if (e.rank === 0 && e.attackState === 'none') this.beginAttackPreparation(e);
-      else if (e.rank > 0 && e.attackState !== 'none') this.clearAttackPreparation(e);
+      if (e.isProjectile) continue; // 投射物不備戰,靠 advanceProjectiles 直接命中
+      if (this.inAttackRange(e) && e.attackState === 'none') this.beginAttackPreparation(e);
+      else if (!this.inAttackRange(e) && e.attackState !== 'none') this.clearAttackPreparation(e);
     }
   }
 
   tickSpecialCooldowns() {
-    for (const e of this.living) e.specialCooldown = Math.max(0, (e.specialCooldown ?? 0) - 1);
+    for (const e of this.living) {
+      for (const k of Object.keys(e.specialCooldowns ?? {})) {
+        e.specialCooldowns[k] = Math.max(0, e.specialCooldowns[k] - 1);
+      }
+    }
   }
 
   /** 執行已預告的特殊行動；蓄力與執行期間都不移動。 */
@@ -225,32 +250,113 @@ export class Formation {
         e.intent.remaining -= 1;
         continue;
       }
-      const def = getEnemyDef(e.defId);
-      const special = def.special;
-      if (special?.id === e.intent.id && special.buffId) {
-        const before = e.buffs[special.buffId] ?? 0;
-        e.buffs[special.buffId] = Math.min(special.buffCap, before + special.buffStacks);
-        resolved.push({
-          uid: e.uid,
-          intent: special.id,
-          buffId: special.buffId,
-          added: e.buffs[special.buffId] - before,
-          stacks: e.buffs[special.buffId],
-        });
-        e.specialCooldown = special.cooldownTurns;
+      const sp = enemySpecials(getEnemyDef(e.defId)).find((s) => s.id === e.intent.id);
+      if (sp) {
+        const outcome = this.applySpecial(e, sp);
+        if (outcome) resolved.push(outcome);
+        e.specialCooldowns[sp.id] = sp.cooldownTurns ?? 0;
       }
       e.intent = null;
     }
     return { stayed, resolved };
   }
 
-  /** 為下一個敵人相位規劃特殊行動；移動本身不建立頭頂意圖。 */
+  /** 依 special.type 執行一次特殊行動,回傳給 UI 演出的結果（null＝沒發生）。 */
+  applySpecial(enemy, sp) {
+    const base = { uid: enemy.uid, intent: sp.id, type: sp.type ?? 'buff' };
+    // 疊 buff（如扎馬取得不動）
+    if (sp.buffId) {
+      const before = enemy.buffs[sp.buffId] ?? 0;
+      enemy.buffs[sp.buffId] = Math.min(sp.buffCap, before + sp.buffStacks);
+      return { ...base, type: 'buff', buffId: sp.buffId, added: enemy.buffs[sp.buffId] - before, stacks: enemy.buffs[sp.buffId] };
+    }
+    if (sp.type === 'summon') {
+      const rank = this.summonAt(sp.summonDefId, sp.summonCount ?? 2);
+      return rank == null ? null : { ...base, summoned: sp.summonCount ?? 2 };
+    }
+    if (sp.type === 'retreat') {
+      return this.retreatEnemy(enemy, sp.steps ?? 1) ? base : null;
+    }
+    if (sp.type === 'projectile') {
+      const proj = this.launchProjectile(enemy, sp.projDamage ?? enemy.damage);
+      return proj ? { ...base, projectileUid: proj.uid } : null;
+    }
+    return null;
+  }
+
+  /** 在王前方一格（同一路,朝玩家）生成一枚投射物。前方無空格則作罷。@returns 投射物或 null */
+  launchProjectile(enemy, damage) {
+    const rank = enemy.rank - 1;
+    if (rank < 0 || this.at(rank, enemy.lane)) return null;
+    const proj = createProjectile(rank, enemy.lane, damage);
+    this.enemies.push(proj);
+    return proj;
+  }
+
+  /**
+   * 投射物前進：每次「出牌」呼叫一次。每枚往前一格；越過最前線（rank < 0）即命中玩家並消失。
+   * @returns { moved:bool, damage:總命中傷害, hits:[uid...] } 供 UI 演出
+   */
+  advanceProjectiles() {
+    let damage = 0;
+    const hits = [];
+    let moved = false;
+    for (const p of this.living.filter((e) => e.isProjectile)) {
+      moved = true;
+      const to = p.rank - 1;
+      if (to < 0) {
+        damage += p.damage;
+        hits.push(p.uid);
+        p.alive = false;
+      } else {
+        p.rank = to;
+      }
+    }
+    return { moved, damage, hits };
+  }
+
+  /**
+   * 召喚：在王「前方」最靠近的一整排空排放一排小兵（夾在玩家與王之間,立即成為威脅）。
+   * 沒有完全空的排就作罷。@returns 生成的 rank,或 null
+   */
+  summonAt(defId, count) {
+    if (!defId) return null;
+    for (let r = 0; r <= this.maxRank; r++) {
+      if (!this.living.some((e) => e.rank === r)) {
+        this.addRow(r, defId, count);
+        return r;
+      }
+    }
+    return null;
+  }
+
+  /** 後退：往更遠的 rank 移 steps 格（維持遠程距離）。受 maxRank 與佔格限制。@returns 是否移動 */
+  retreatEnemy(enemy, steps = 1) {
+    let moved = false;
+    for (let i = 0; i < steps; i++) {
+      const to = enemy.rank + 1;
+      if (to > this.maxRank || this.at(to, enemy.lane)) break;
+      enemy.rank = to;
+      this.clearAttackPreparation(enemy);
+      moved = true;
+    }
+    return moved;
+  }
+
+  /** 為下一個敵人相位規劃特殊行動；移動本身不建立頭頂意圖。每敵最多預告一個。 */
   planSpecialIntents() {
     for (const e of this.living) {
-      const special = getEnemyDef(e.defId).special;
-      if (!special || e.rank === 0 || e.intent || e.specialCooldown > 0) continue;
-      if ((e.buffs[special.buffId] ?? 0) >= special.buffCap) continue;
-      if (this.rng() < special.chance) e.intent = { id: special.id, remaining: special.chargeTurns };
+      if (e.isProjectile || e.rank === 0 || e.intent) continue;
+      for (const sp of enemySpecials(getEnemyDef(e.defId))) {
+        if ((e.specialCooldowns[sp.id] ?? 0) > 0) continue;
+        if (sp.buffId && (e.buffs[sp.buffId] ?? 0) >= sp.buffCap) continue;
+        if (sp.minRank != null && e.rank < sp.minRank) continue; // 如投射物只在遠距離施放
+        if (sp.maxRankToTrigger != null && e.rank > sp.maxRankToTrigger) continue; // 如後退只在玩家逼近時
+        if (this.rng() < sp.chance) {
+          e.intent = { id: sp.id, remaining: sp.chargeTurns };
+          break;
+        }
+      }
     }
   }
 
@@ -265,7 +371,9 @@ export class Formation {
    */
   advance({ stay = new Set() } = {}) {
     for (const e of this.livingEnemiesInOrder()) {
-      if (e.rank === 0 || stay.has(e.uid)) continue;
+      if (e.isProjectile) continue; // 投射物只在「出牌」時前進,不隨敵方相位移動
+      // 到達自身射程（雜兵＝rank 0；遠程王＝更遠）即停止前進，在該處備戰。
+      if (this.inAttackRange(e) || stay.has(e.uid)) continue;
       const r = e.rank;
       const lane = e.lane;
       if (!this.at(r - 1, lane)) {

@@ -1,6 +1,7 @@
 import { spinSlot, applySlotReward, SLOT_SYMBOL_LABEL } from './slot.js';
 import { STATUS } from './StatusLibrary.js';
-import { getCardDef } from './CardLibrary.js';
+import { getCardDef, defIdsByRarity, RARITY } from './CardLibrary.js';
+import { weightedPickDefId } from './rarity.js';
 
 /**
  * 奇遇·江湖事件：白天池中的 'event' 節點內容。零 Phaser。
@@ -137,9 +138,8 @@ export const EVENT_DEFS = {
           const e = run.tuning.run.event;
           if (run.money < e.cardPrice) return { text: '郎中攤手：「束脩都出不起？」' };
           run.money -= e.cardPrice;
-          const pool = run.tuning.run.shop.cardPool;
-          const defId = pool[Math.floor(rng() * pool.length)];
-          run.addDeckCard(defId);
+          const defId = weightedPickDefId(run.tuning.run.shop.cardPool, rng, run.tuning);
+          run.acquireDeckCard(defId, rng);
           return { text: `郎中傳你一招【${getCardDef(defId).name}】。` };
         },
       },
@@ -183,6 +183,37 @@ export const EVENT_DEFS = {
         },
       },
       { label: '婉拒', resolve: () => ({ text: '你搖頭：「晚輩緣分未到。」拱手離去。' }) },
+    ],
+  },
+
+  miJi: {
+    id: 'miJi',
+    name: '祕笈殘卷',
+    text: '破廟供桌下壓著一卷泛黃的武學殘頁,依稀認得出是某派失傳的絕學。',
+    choices: [
+      {
+        label: (run) => `參詳習得（${run.tuning.run.event.manualCost} 銀兩）`,
+        desc: '悟一招絕學,通常一入手就是高境界',
+        resolve: (run, rng) => {
+          const c = run.tuning.run.event.manualCost;
+          if (run.money < c) return { text: '你囊中羞澀,只能望卷興嘆。' };
+          const pool = defIdsByRarity(RARITY.SIGNATURE);
+          if (!pool.length) return { text: '殘卷字跡漫漶,終究參不透。' };
+          run.money -= c;
+          const defId = pool[Math.floor(rng() * pool.length)];
+          run.acquireDeckCard(defId, rng);
+          return { text: `你閉目參詳良久,習得絕學【${getCardDef(defId).name}】！` };
+        },
+      },
+      {
+        label: (run) => `變賣（＋${run.tuning.run.event.manualSell} 銀兩）`,
+        desc: '換點盤纏',
+        resolve: (run) => {
+          const g = run.tuning.run.event.manualSell;
+          run.money += g;
+          return { text: `你把殘卷賣給識貨的行商,得了 ${g} 銀兩。` };
+        },
+      },
     ],
   },
 };
