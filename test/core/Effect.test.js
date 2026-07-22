@@ -133,40 +133,33 @@ describe('純狀態卡：境界加每次層數，連段加施放次數', () => {
   });
 });
 
-describe('功能牌：境界走溫和曲線，不吃等比', () => {
-  const yunQi = () => getCardDef('yunQi'); // 內力，線性：境界 N ＝ +N
-  const linJi = () => getCardDef('linJi'); // 抽牌，遞增：境界 N ＝ 抽 N+1
+describe('功能牌：階級決定單次產量，連擊決定施放次數', () => {
+  const yunQi = () => getCardDef('yunQi');
+  const linJi = () => getCardDef('linJi');
 
-  it('運氣調息：境界一 +1、境界三 +3（不是 +4）', () => {
-    expect(resolveEffect(yunQi(), 1, 1).energy).toBe(1);
-    expect(resolveEffect(yunQi(), 3, 1).energy).toBe(3);
+  it('運氣調息與臨機應變皆使用 3／4／5／6／7 曲線', () => {
+    expect([1, 2, 3, 4, 5].map((rank) => resolveEffect(yunQi(), rank, 1).energy)).toEqual([3, 4, 5, 6, 7]);
+    expect([1, 2, 3, 4, 5].map((rank) => resolveEffect(linJi(), rank, 1).inspiration)).toEqual([3, 4, 5, 6, 7]);
   });
 
-  it('臨機應變：境界一抽 2、境界二抽 3、境界三抽 4', () => {
-    expect(resolveEffect(linJi(), 1, 1).draw).toBe(2);
-    expect(resolveEffect(linJi(), 2, 1).draw).toBe(3);
-    expect(resolveEffect(linJi(), 3, 1).draw).toBe(4);
+  it('超過五階仍取曲線最後一級', () => {
+    expect(resolveEffect(yunQi(), 8, 1).energy).toBe(7);
+    expect(resolveEffect(linJi(), 8, 1).inspiration).toBe(7);
   });
 
-  it('連段對功能牌是「加法」：+（step−1），不是乘', () => {
-    // 內力：境界2 基礎 +2，連段第 5 張 ⇒ 再 +4 ＝ 6
-    expect(resolveEffect(yunQi(), 2, 5).energy).toBe(6);
-    // 抽牌：境界2 基礎抽 3，連段第 5 張 ⇒ 再 +4 ＝ 7
-    expect(resolveEffect(linJi(), 2, 5).draw).toBe(7);
+  it('連擊會重複完整施放：四階、連擊四次得到 24', () => {
+    expect(resolveEffect(yunQi(), 4, 4).energy).toBe(24);
+    expect(resolveEffect(linJi(), 4, 4).inspiration).toBe(24);
   });
 
-  it('連段第一張不加成（step1 ＝ +0）', () => {
-    expect(resolveEffect(yunQi(), 3, 1).energy).toBe(3); // 境界3 基礎 +3，step1 不加
-    expect(resolveEffect(linJi(), 3, 1).draw).toBe(4); // 境界3 抽 4，step1 不加
+  it('中斷連擊時傳入一次施放，不會沿用舊連擊', () => {
+    expect(resolveEffect(yunQi(), 3, 1).energy).toBe(5);
+    expect(resolveEffect(linJi(), 3, 1).inspiration).toBe(5);
   });
 
-  it('使用者範例：臨機應變境界3、連段第3張 ⇒ 抽 4+2 ＝ 6', () => {
-    expect(resolveEffect(linJi(), 3, 3).draw).toBe(6);
-  });
-
-  it('卡面顯示：力/抽 標籤', () => {
-    expect(cardFaceValue(yunQi(), 3)).toMatchObject({ tag: '力', text: '＋3' });
-    expect(cardFaceValue(linJi(), 2)).toMatchObject({ tag: '抽', text: '3' });
+  it('卡面顯示：力／感標籤與單次產量', () => {
+    expect(cardFaceValue(yunQi(), 3)).toMatchObject({ tag: '力', text: '＋5' });
+    expect(cardFaceValue(linJi(), 2)).toMatchObject({ tag: '靈感', text: '＋4' });
   });
 });
 
@@ -174,7 +167,7 @@ describe('自訂成長函式', () => {
   it('可以自訂成任意成長方式', () => {
     const weird = {
       base: { hits: 2, damage: 3 },
-      realmScale: (e, realm) => ({ ...e, hits: e.hits + realm }),
+      rankScale: (e, rank) => ({ ...e, hits: e.hits + rank }),
       comboScale: (e, mult) => ({ ...e, damage: e.damage + mult }),
     };
     const e = resolveEffect(weird, 3, 4);

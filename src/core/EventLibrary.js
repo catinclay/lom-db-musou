@@ -1,5 +1,4 @@
 import { spinSlot, applySlotReward, SLOT_SYMBOL_LABEL } from './slot.js';
-import { STATUS } from './StatusLibrary.js';
 import { getCardDef } from './CardLibrary.js';
 
 /**
@@ -16,6 +15,8 @@ import { getCardDef } from './CardLibrary.js';
 export const EVENT_DEFS = {
   yeGu: {
     id: 'yeGu',
+    offerRisk: 'normal',
+    offerRole: 'story',
     name: '路邊野菇',
     text: '路邊冒出一叢顏色詭異的菇，聞起來有股說不上來的味道。看起來……能吃？',
     choices: [
@@ -24,11 +25,10 @@ export const EVENT_DEFS = {
         desc: '也許有奇效，也許拉肚子',
         resolve: (run, rng) => {
           if (rng() < 0.5) {
-            const status = rng() < 0.5 ? STATUS.POISON : STATUS.BURN;
-            const name = run.enchantRandomAttackCard(status, 1, rng);
-            return {
-              text: name ? `菇有奇效！你的【${name}】染上了${status === STATUS.POISON ? '毒' : '火'}性。` : '菇很鮮美，但什麼也沒發生。',
-            };
+            const pool = run.tuning.run.shop.cardPool;
+            const defId = pool[Math.floor(rng() * pool.length)];
+            run.addDeckCard(defId);
+            return { text: `菇有奇效！你恍然悟出一招【${getCardDef(defId).name}】。` };
           }
           const dmg = run.tuning.run.event.mushroomPoison;
           run.hp = Math.max(1, run.hp - dmg);
@@ -49,6 +49,8 @@ export const EVENT_DEFS = {
 
   duFang: {
     id: 'duFang',
+    offerRisk: 'normal',
+    offerRole: 'chance',
     name: '賭坊',
     text: '煙霧瀰漫的賭坊，老闆搖著骰盅朝你笑：「客官，來一把？」',
     choices: [
@@ -70,6 +72,8 @@ export const EVENT_DEFS = {
 
   chouJia: {
     id: 'chouJia',
+    offerRisk: 'dangerous',
+    offerRole: 'conflict',
     name: '仇家堵路',
     text: '一夥仇家攔在路中央，刀已出鞘：「此路是我開！」',
     choices: [
@@ -95,6 +99,8 @@ export const EVENT_DEFS = {
 
   baoXiang: {
     id: 'baoXiang',
+    offerRisk: 'normal',
+    offerRole: 'story',
     name: '荒廟寶箱',
     text: '荒廟角落一口上鎖的舊木箱，鎖已鏽蝕。',
     choices: [
@@ -117,6 +123,9 @@ export const EVENT_DEFS = {
 
   langZhong: {
     id: 'langZhong',
+    offerRisk: 'safe',
+    offerRole: 'recovery',
+    offerRecovery: true,
     name: '雲遊郎中',
     text: '一位雲遊郎中在樹下歇腳，藥箱敞開，笑瞇瞇地看著你。',
     choices: [
@@ -149,17 +158,19 @@ export const EVENT_DEFS = {
 
   gaoRen: {
     id: 'gaoRen',
+    offerRisk: 'safe',
+    offerRole: 'growth',
     name: '高人指點',
     text: '崖邊一位白鬚高人閉目打坐，忽然睜眼：「小子，想練點什麼？」',
     choices: [
       {
-        label: (run) => `練內力（${run.tuning.run.event.trainCost} 銀兩，內力上限 +1）`,
+        label: (run) => `練內力（${run.tuning.run.event.trainCost} 銀兩，內力 +1 格）`,
         resolve: (run) => {
           const c = run.tuning.run.event.trainCost;
           if (run.money < c) return { text: '高人搖頭：「連束脩都沒有，練什麼功。」' };
           run.money -= c;
-          run.attrs.energyPerTurn += 1;
-          return { text: '高人拍你天靈，內力上限 +1。' };
+          run.attrs.energyPerTurn += run.tuning.energyUnit;
+          return { text: '高人拍你天靈，內力 +1 格。' };
         },
       },
       {
@@ -173,16 +184,39 @@ export const EVENT_DEFS = {
         },
       },
       {
-        label: (run) => `悟境界（${run.tuning.run.event.realmCost} 銀兩，境界上限 +1）`,
+        label: (run) => `悟階級（${run.tuning.run.event.rankCost} 銀兩，階級上限 +1）`,
         resolve: (run) => {
-          const c = run.tuning.run.event.realmCost;
-          if (run.money < c) return { text: '高人嘆道：「悟境界的機緣，可不便宜。」' };
+          const c = run.tuning.run.event.rankCost;
+          if (run.money < c) return { text: '高人嘆道：「悟透招式階級的機緣，可不便宜。」' };
           run.money -= c;
-          run.attrs.maxRealm += 1;
-          return { text: '你福至心靈，境界上限 +1。' };
+          run.attrs.maxRank += 1;
+          return { text: '你福至心靈，階級上限 +1。' };
         },
       },
       { label: '婉拒', resolve: () => ({ text: '你搖頭：「晚輩緣分未到。」拱手離去。' }) },
+    ],
+  },
+
+  yuanShou: {
+    id: 'yuanShou',
+    offerRisk: 'safe',
+    offerRole: 'recovery',
+    offerRecovery: true,
+    specialOfferOnly: true,
+    name: '山亭歇腳',
+    text: '山雨忽至，路旁恰有一座無人的舊亭。簷下乾燥，石凳上還留著半壺溫水。',
+    choices: [
+      {
+        label: '坐下調息片刻',
+        desc: '雨聲掩去江湖喧囂',
+        resolve: (run) => {
+          const ratio = run.tuning.run.offer.lowHpMercy.healMaxHpRatio;
+          const heal = Math.max(1, Math.ceil(run.maxHp * ratio));
+          const before = run.hp;
+          run.hp = Math.min(run.maxHp, run.hp + heal);
+          return { text: `你運氣調息，恢復了 ${run.hp - before} 點血。除此之外，什麼也沒帶走。` };
+        },
+      },
     ],
   },
 };

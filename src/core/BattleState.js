@@ -1,10 +1,10 @@
 import { Deck } from './Deck.js';
 import { Hand } from './Hand.js';
-import { createCard, cardEnchants } from './Card.js';
+import { createCard } from './Card.js';
 import { getCardDef } from './CardLibrary.js';
 import { resolveEffect } from './Effect.js';
 import { ComboTracker } from './ComboTracker.js';
-import { resolveAutoMerges, applyFormlessMerge } from './MergeEngine.js';
+import { resolveAutoMerges, applyWangxingPump, gainInspiration } from './MergeEngine.js';
 import { Formation } from './Formation.js';
 import { resolveAttack, TARGET } from './combat.js';
 import { applyStatus, resolveStatusTick } from './StatusLibrary.js';
@@ -19,13 +19,13 @@ import { defaultRng } from './rng.js';
  *
  * 牌組定義（deckList）與戰鬥實例是分開的：每次 start() 都從 deckList
  * 現生一批全新的 Card。合成只動實例，所以下一場戰鬥自然乾淨重來，
- * 境界無法跨場滾雪球。
+ * 階級無法跨場滾雪球。
  *
- * 也是 MergeEngine 的 ctx（提供 hand / deck / rng / mergesThisTurn）。
+ * 也是 MergeEngine 的 ctx（提供 hand / deck / inspiration / mergesThisTurn）。
  */
 export class BattleState {
   /**
-   * @param deckList 牌組定義，形如 [{ defId, realm?, tags?, enchants? }, ...]。跨戰鬥保存，永不被合成改動。
+   * @param deckList 牌組定義，形如 [{ defId, rank?, tags? }, ...]。跨戰鬥保存，永不被合成改動。
    * @param battle   這場戰鬥的配置（由 RunState 注入）：
    *   { hp, maxHp, waves, rows, minPerRow, maxPerRow, eliteChance, gruntDefId, eliteDefId }
    *   全部可選；省略則回退 tuning，等同舊沙盒（無限補充波）。
@@ -34,12 +34,12 @@ export class BattleState {
   constructor({ deckList, rng = defaultRng, tuning = TUNING, bus = new EventBus(), battle = {} } = {}) {
     this.deckList = deckList ?? [];
     this.rng = rng;
-    // 主角屬性覆蓋 tuning 的 maxRealm/energyPerTurn/startingHandSize（其餘 nested 值照舊共用）——
+    // 主角屬性覆蓋 tuning 的 maxRank/energyPerTurn/startingHandSize（其餘 nested 值照舊共用）——
     // 這樣屬性成長會流進回合資源與**合成上限**（merge 吃 this.tuning）。
     this.tuning = battle.attrs ? { ...tuning, ...battle.attrs } : tuning;
     this.bus = bus;
     this.battleConfig = battle;
-    /** 補抽機率的遞減依據，每回合歸零 */
+    /** Debug／統計用的本回合合成次數；靈感本身跨回合保留。 */
     this.mergesThisTurn = 0;
   }
 
@@ -47,11 +47,13 @@ export class BattleState {
   start() {
     const bc = this.battleConfig;
     const cards = this.deckList.map((spec) =>
-      createCard(spec.defId, { realm: spec.realm ?? 1, tags: spec.tags ?? [], enchants: spec.enchants ?? {} })
+      createCard(spec.defId, { rank: spec.rank ?? 1, tags: spec.tags ?? [] })
     );
     this.deck = new Deck(cards, this.rng);
     this.deck.shuffleDrawPile();
     this.hand = new Hand();
+    this.exhaustPile = [];
+    this.inspiration = 0;
     this.combo = new ComboTracker(this.tuning);
     this.energy = this.tuning.energyPerTurn;
     this.turn = 0;
@@ -73,9 +75,10 @@ export class BattleState {
     this.formation.refill(this.reinforcementRowsPerWave, this.enemySpec());
     this.formation.planSpecialIntents();
 
-    this.runRelicHook('onBattleStart'); // 遺物：戰鬥開場一次性效果（如給敵陣上狀態）
+    const openingTranscript = [];
+    this.runRelicHook('onBattleStart', openingTranscript); // 遺物：戰鬥開場一次性效果
     this.bus.emit(EVENT.BATTLE_STARTED, { state: this });
-    return this.startTurn();
+    return this.startTurn(openingTranscript);
   }
 
   /** 這場戰鬥帶的遺物定義（由 battleConfig.relics 的 id 解算）。 */
@@ -129,7 +132,7 @@ export class BattleState {
   }
 
   /** @returns transcript */
-  startTurn() {
+  startTurn(prefixTranscript = []) {
     const pendingClearReward = this.pendingClearReward;
     this.pendingClearReward = null;
     this.turn += 1;
@@ -142,13 +145,18 @@ export class BattleState {
     // 先把該抽的牌一次抽完，再一口氣解算合成 ——
     // 不是抽一張算一次，否則玩家看不出「這批牌湊出了什麼」。
     const handSize = this.tuning.startingHandSize + this.relicMod('handSize') + (pendingClearReward?.draw ?? 0);
-    const transcript = this.drawCards(handSize);
+    const transcript = [...prefixTranscript, ...this.drawCards(handSize)];
     transcript.push(...resolveAutoMerges(this, this.tuning));
 
     this.runRelicHook('onTurnStart'); // 遺物：每回合開始效果（如給敵人上狀態）
     this.bus.emit(EVENT.TURN_STARTED, { turn: this.turn });
     this.bus.emit(EVENT.TRANSCRIPT, transcript);
     return transcript;
+  }
+
+  /** 增加靈感；滿值換成抽牌，抽到的牌由呼叫端接續解算自動合成。 */
+  gainInspiration(amount, transcript, source = 'effect') {
+    return gainInspiration(this, amount, transcript, this.tuning, source);
   }
 
   /**
@@ -273,25 +281,51 @@ export class BattleState {
     if (!card) return { ok: false, reason: 'not_in_hand' };
 
     const def = getCardDef(card.defId);
-    if (def.catalyst) {
-      // 忘形催化劑無戰鬥數值，只能當合成材料，不能單獨出牌
-      this.bus.emit(EVENT.CARD_PLAY_REJECTED, { card, reason: 'catalyst' });
-      return { ok: false, reason: 'catalyst' };
-    }
     if (this.energy < def.cost) {
       this.bus.emit(EVENT.CARD_PLAY_REJECTED, { card, reason: 'no_energy' });
       return { ok: false, reason: 'no_energy' };
     }
 
     this.energy -= def.cost;
-    const combo = this.combo.play(card);
-    const effect = resolveEffect(def, card.realm, combo.multiplier);
-
-    // 先把打出的牌移出手牌，之後若這張牌會抽牌/引爆合成，才不會把自己算進去
+    // 先把打出的牌移出手牌，之後若這張牌會抽牌/引爆合成，才不會把自己算進去。
     this.hand.removeByUid(uid);
+
+    // 忘形第一模式：境界歸零、連擊保留；本場消耗，不進棄牌堆，也不進連擊。
+    if (def.forgetForm) {
+      this.exhaustPile.push(card);
+      const combo = { ...this.combo.forgetForm(), broke: false, interrupted: false };
+      const effect = { hits: 0, totalDamage: 0, totalArmor: 0 };
+      const result = {
+        card, def, combo, effect, damage: 0, armor: 0, exhausted: true, forgotForm: true,
+        transcript: [{ type: TX.EXHAUST, card }],
+      };
+      this.bus.emit(EVENT.CARD_PLAYED, result);
+      this.bus.emit(EVENT.ENERGY_CHANGED, { energy: this.energy });
+      this.bus.emit(EVENT.COMBO_CHANGED, combo);
+      this.statusTick('play');
+      const clearReward = this.rewardClearIfNeeded();
+      if (clearReward) {
+        result.clearReward = { energy: clearReward.energy, draw: clearReward.draw };
+        result.transcript.push(...clearReward.transcript);
+        this.bus.emit(EVENT.ENERGY_CHANGED, { energy: this.energy });
+      }
+      this.checkOutcome();
+      return { ok: true, result };
+    }
+
+    const combo = this.combo.play(card);
+    const effect = resolveEffect(def, card.rank, combo.multiplier);
     this.deck.discard(card);
 
-    const result = { card, def, combo, effect, damage: effect.totalDamage, armor: effect.totalArmor };
+    const result = {
+      card,
+      def,
+      combo,
+      effect,
+      damage: effect.totalDamage,
+      armor: effect.totalArmor,
+      transcript: [{ type: TX.DISCARD, card }],
+    };
 
     // 依「效果欄位」逐項套用，而不是硬綁牌型 —— 一張牌可同時做好幾件事
     if (effect.totalDamage > 0 || def.target) {
@@ -318,11 +352,15 @@ export class BattleState {
     if (effect.energy) {
       this.energy += effect.energy;
     }
+    if (effect.inspiration) {
+      this.gainInspiration(effect.inspiration, result.transcript, 'card');
+      result.transcript.push(...resolveAutoMerges(this, this.tuning));
+    }
     if (effect.draw) {
       // 抽牌會引爆合成，產出一份 transcript 交給場景演出（跟 debugDraw 同路數）
       const tx = this.drawCards(effect.draw);
       tx.push(...resolveAutoMerges(this, this.tuning));
-      result.transcript = tx;
+      result.transcript.push(...tx);
     }
 
     this.bus.emit(EVENT.CARD_PLAYED, result);
@@ -334,25 +372,16 @@ export class BattleState {
     this.statusTick('play');
 
     if (result.combat) {
-      // 卡片「自身」的狀態效果（毒霧的毒、火藥的火）：吃境界與連段縮放後，對每個命中者上一次。
+      // 卡片「自身」的狀態效果（毒霧的毒、火藥的火）：吃階級與連擊縮放後，對每個命中者上一次。
       if (def.effectStatus) {
         this.applyStatusToHits(result.combat.hits, def.effectStatus.id, effect.statusStacks, { perWave: true });
-      }
-      // 附魔（外加）：層數由 enchantStacks 算（傷害卡按傷害縮放；無傷害卡走客製效果）。
-      for (const [id, level] of cardEnchants(card)) {
-        this.applyStatusToHits(
-          result.combat.hits,
-          id,
-          this.enchantStacks(def, card.realm, id, level),
-          { perWave: Boolean(def.effectStatus) }
-        );
       }
     }
 
     const clearReward = this.rewardClearIfNeeded();
     if (clearReward) {
       result.clearReward = { energy: clearReward.energy, draw: clearReward.draw };
-      result.transcript = [...(result.transcript ?? []), ...clearReward.transcript];
+      result.transcript.push(...clearReward.transcript);
       this.bus.emit(EVENT.ENERGY_CHANGED, { energy: this.energy });
     }
     // 這張牌可能清空了最後一波敵陣（且無補充波）⇒ 判勝
@@ -360,24 +389,7 @@ export class BattleState {
     return { ok: true, result };
   }
 
-  /**
-   * 一個附魔（statusId、level）套到敵人身上是幾層。三條路（由專到泛）：
-   *   1. 卡自訂 `def.enchantStacks(id, level, ctx)` —— 完全客製。
-   *   2. 附魔與卡「自身狀態效果」同種（如毒霧的毒附魔）：放大境界縮放後的自身效果 × level
-   *      （疊在 effectStatus 之上：level 1 ⇒ 總共 2 倍、level 2 ⇒ 3 倍…）。
-   *   3. 一般傷害卡：round(每發基礎傷 × enchantScale × level)。無傷害又無上述客製 ⇒ 0。
-   */
-  enchantStacks(def, realm, statusId, level) {
-    if (def.enchantStacks) return def.enchantStacks(statusId, level, { def, realm });
-    if (def.effectStatus && def.effectStatus.id === statusId) {
-      return resolveEffect(def, realm, 1).statusStacks * level;
-    }
-    const baseDmg = resolveEffect(def, realm, 1).damage ?? 0;
-    const scale = def.enchantScale ?? this.tuning.combat.enchantScaleDefault;
-    return Math.round(baseDmg * scale * level);
-  }
-
-  /** 對命中且存活的敵人上狀態；純狀態卡每波各套一次，一般附魔整張牌仍只套一次。 */
+  /** 對命中且存活的敵人上狀態；純狀態卡每波各套一次。 */
   applyStatusToHits(hits, id, stacks, { perWave = false } = {}) {
     if (stacks <= 0) return;
     const seen = new Set();
@@ -417,9 +429,9 @@ export class BattleState {
     return result;
   }
 
-  /** 玩家拉箭頭把 dragged 併進 target。@returns transcript 或 null（配對不合法） */
-  formlessMerge(draggedUid, targetUid) {
-    const transcript = applyFormlessMerge(this, draggedUid, targetUid, this.tuning);
+  /** 玩家把忘形拖到具體牌上，使其升一階。 */
+  pumpCard(wangxingUid, targetUid) {
+    const transcript = applyWangxingPump(this, wangxingUid, targetUid, this.tuning);
     if (transcript) this.bus.emit(EVENT.TRANSCRIPT, transcript);
     return transcript;
   }
@@ -447,8 +459,8 @@ export class BattleState {
   }
 
   /** Debug 用：直接塞一張牌進手牌，並解算隨之引爆的連鎖。@returns transcript */
-  debugAddCard(defId, { realm = 1, tags = [], enchants = {} } = {}) {
-    const card = createCard(defId, { realm, tags, enchants });
+  debugAddCard(defId, { rank = 1, tags = [] } = {}) {
+    const card = createCard(defId, { rank, tags });
     this.hand.add(card);
     const transcript = [{ type: TX.DRAW, card }];
     transcript.push(...resolveAutoMerges(this, this.tuning));

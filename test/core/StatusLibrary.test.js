@@ -188,52 +188,22 @@ describe('出牌卡上狀態（BattleState.playCard）', () => {
     expect(e.statuses.burn).toBe(4); // 下一次出牌才從 3 疊到 4
   });
 
-  it('境界決定每波層數，連段多波會各自套用到命中敵人', () => {
+  it('階級決定每波層數，連擊多波會各自套用到命中敵人', () => {
     const battle = new BattleState({ deckList: [], rng: seededRng(1), tuning: TUNING });
     battle.start();
     battle.formation.enemies = [];
     battle.formation.addRow(0, 'han', 1);
     const e = battle.formation.frontLivingEnemy();
 
-    battle.debugAddCard('yunQi', { realm: 1 });
+    battle.debugAddCard('yunQi', { rank: 1 });
     battle.playCard(battle.hand.toArray().find((c) => c.defId === 'yunQi').uid);
-    battle.debugAddCard('duWu', { realm: 2 });
+    battle.debugAddCard('duWu', { rank: 2 });
     const played = battle.playCard(battle.hand.toArray().find((c) => c.defId === 'duWu').uid);
 
-    expect(played.result.combo.step).toBe(2);
+    expect(played.result.combo.combo).toBe(2);
     expect(played.result.effect).toMatchObject({ statusStacks: 5, hits: 2 }); // 每波 round(3×1.5)，共兩波
     expect(e.statuses.poison).toBe(10); // 同一敵人每波各吃 5
     expect(e.hp).toBe(e.maxHp);
   });
 
-  it('附魔層數＝卡每發基礎傷 × enchantScale × level（隨傷害動態）', () => {
-    const battle = new BattleState({ deckList: [], rng: seededRng(1), tuning: TUNING });
-    battle.start();
-    battle.formation.enemies = [];
-    battle.formation.addRow(0, 'han', 1); // 一個大漢在最近排（hp 36，扛得住）
-    const e = battle.formation.frontLivingEnemy();
-
-    // 附毒 level 5 的貫：base 傷 8、enchantScale 0.15 → round(8×0.15×5)=6 層
-    battle.debugAddCard('guan', { enchants: { poison: 5 } });
-    const guan = battle.hand.toArray().find((c) => c.defId === 'guan');
-    battle.playCard(guan.uid);
-
-    // 本張牌新上的附魔延後首次 tick，因此直接顯示完整 6 層
-    expect(e.statuses.poison).toBe(6);
-  });
-
-  it('無傷害卡的同種附魔放大自身效果（毒霧＋毒附魔 level1 ＝ 雙倍毒）', () => {
-    const battle = new BattleState({ deckList: [], rng: seededRng(1), tuning: TUNING });
-    battle.start();
-    battle.formation.enemies = [];
-    battle.formation.addRow(0, 'luo', 1);
-    const e = battle.formation.frontLivingEnemy();
-
-    battle.debugAddCard('duWu', { realm: 3, enchants: { poison: 1 } });
-    const card = battle.hand.toArray().find((c) => c.defId === 'duWu');
-    battle.playCard(card.uid);
-
-    // 境界三自身效果 8 + 同種附魔 8×1 = 16（＝雙倍）；新狀態當次不 tick
-    expect(e.statuses.poison).toBe(16);
-  });
 });

@@ -6,12 +6,16 @@
  */
 export const TX = {
   DRAW: 'draw',
-  /** 補抽的機率骰輸了（牌庫還有牌，只是沒抽成） */
-  DRAW_MISS: 'draw_miss',
-  /** 骰贏了但牌庫與棄牌堆都空 —— 與 DRAW_MISS 是兩回事，演出也不同 */
+  /** 靈感滿格但牌庫與棄牌堆都空。 */
   DRAW_FIZZLE: 'draw_fizzle',
   MERGE: 'merge',
   DISCARD: 'discard',
+  /** 卡片在本場戰鬥中消耗，不會進棄牌堆。 */
+  EXHAUST: 'exhaust',
+  /** 忘形施放到具體牌：舊實例換成升階後的新 uid。 */
+  RANK_UP: 'rank_up',
+  /** 靈感增加一點；滿 threshold 時該事件後緊接一個抽牌事件。 */
+  INSPIRATION: 'inspiration',
   /** 防護網被觸發 ＝ 有 bug，正常遊戲永遠不該出現 */
   CHAIN_GUARD_TRIPPED: 'chain_guard_tripped',
 };

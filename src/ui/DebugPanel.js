@@ -1,7 +1,7 @@
 import { CARD_DEFS } from '../core/CardLibrary.js';
-import { TAG } from '../core/Card.js';
 import { STATUS_DEFS } from '../core/StatusLibrary.js';
-import { drawChanceFor } from '../core/MergeEngine.js';
+import { TUNING } from '../config/tuning.js';
+import { energyPips, inspirationGauge } from './format.js';
 
 /**
  * Debug 面板。
@@ -50,8 +50,7 @@ export class DebugPanel {
       document.head.appendChild(style);
     }
 
-    const typeMark = (t) =>
-      t === 'attack' ? '攻' : t === 'defense' ? '防' : t === 'skill' ? '技' : '材';
+    const typeMark = (t) => t === 'attack' ? '攻' : t === 'defense' ? '防' : '技';
     const options = Object.values(CARD_DEFS)
       .map((d) => `<option value="${d.defId}">${d.name}（${typeMark(d.type)}）</option>`)
       .join('');
@@ -65,24 +64,8 @@ export class DebugPanel {
       <select data-def>${options}</select>
       <div class="row">
         <div>
-          <label>境界</label>
-          <input type="number" data-realm value="1" min="1" max="99">
-        </div>
-      </div>
-      <div class="chk"><input type="checkbox" data-formless id="dbg-fl"><label for="dbg-fl" style="margin:0">忘形</label></div>
-      <div class="row">
-        <div>
-          <label>附魔</label>
-          <select data-ench>
-            <option value="">無</option>
-            ${Object.values(STATUS_DEFS)
-              .map((s) => `<option value="${s.id}">${s.name}</option>`)
-              .join('')}
-          </select>
-        </div>
-        <div>
-          <label>層</label>
-          <input type="number" data-ench-stacks value="3" min="1" max="99">
+          <label>階級</label>
+          <input type="number" data-rank value="1" min="1" max="99">
         </div>
       </div>
       <button data-spawn>塞牌進手</button>
@@ -93,8 +76,8 @@ export class DebugPanel {
       </div>
       <label>內力</label>
       <div class="row">
-        <button data-energy-minus>− 內力</button>
-        <button data-energy-plus>＋ 內力</button>
+        <button data-energy-minus>− 1 格內力</button>
+        <button data-energy-plus>＋ 1 格內力</button>
       </div>
       <label>debuff（施加 3 層到最前敵）</label>
       <div class="row">
@@ -125,24 +108,19 @@ export class DebugPanel {
 
     const $ = (sel) => this.el.querySelector(sel);
     this.defSel = $('[data-def]');
-    this.realmIn = $('[data-realm]');
-    this.formlessIn = $('[data-formless]');
+    this.rankIn = $('[data-rank]');
     this.statsEl = $('[data-stats]');
     this.speedVal = $('[data-speedval]');
 
     $('[data-spawn]').onclick = () => {
-      const enchId = $('[data-ench]').value;
-      const enchStacks = Math.max(1, parseInt($('[data-ench-stacks]').value, 10) || 1);
       onSpawn(this.defSel.value, {
-        realm: Math.max(1, parseInt(this.realmIn.value, 10) || 1),
-        tags: this.formlessIn.checked ? [TAG.FORMLESS] : [],
-        enchants: enchId ? { [enchId]: enchStacks } : {},
+        rank: Math.max(1, parseInt(this.rankIn.value, 10) || 1),
       });
     };
     $('[data-draw]').onclick = () => onDraw();
     $('[data-endturn]').onclick = () => onEndTurn();
-    $('[data-energy-minus]').onclick = () => onEnergy(-1);
-    $('[data-energy-plus]').onclick = () => onEnergy(1);
+    $('[data-energy-minus]').onclick = () => onEnergy(-TUNING.energyUnit);
+    $('[data-energy-plus]').onclick = () => onEnergy(TUNING.energyUnit);
     $('[data-apply-status]').onclick = () => onStatus($('[data-status]').value);
     $('[data-restart]').onclick = () => onRestart();
 
@@ -156,22 +134,19 @@ export class DebugPanel {
 
   update(battle) {
     const combo = battle.combo;
-    const mult = combo.step > 0 ? battle.tuning.comboMultiplier(combo.step) : 0;
-    // 下一次合成的補抽機率 —— 這是新的平衡樞紐，得看得到才調得動
-    const nextChance = drawChanceFor(battle.mergesThisTurn + 1, battle.tuning);
-
+    const mult = combo.combo > 0 ? battle.tuning.comboMultiplier(combo.combo) : 0;
     this.statsEl.innerHTML =
       `回合   ${battle.turn}\n` +
-      `內力   ${battle.energy} / ${battle.tuning.energyPerTurn}\n` +
+      `內力   ${energyPips(battle.energy, battle.tuning.energyUnit)}（${battle.energy} 小格）\n` +
+      `靈感   ${inspirationGauge(battle.inspiration, battle.tuning.inspiration.threshold)}\n` +
       `手牌   ${battle.hand.size}\n` +
       `牌庫   ${battle.deck.drawCount}\n` +
       `棄牌   ${battle.deck.discardCount}\n` +
       `護甲   ${battle.armor}\n` +
-      `連段   ${combo.step === 0 ? '—' : `第 ${combo.step} 段`}` +
+      `連擊   ${combo.combo === 0 ? '—' : combo.combo}` +
       `${mult > 1 ? ` <span class="hot">×${mult}</span>` : mult === 1 ? ' ×1' : ''}\n` +
-      `前張境界 ${combo.lastRealm ?? '—'}\n` +
+      `境界   ${combo.realm}\n` +
       `本回合合成 ${battle.mergesThisTurn} 次\n` +
-      `下次補抽 <span class="hot">${Math.round(nextChance * 100)}%</span>\n` +
       `本回合傷害 ${battle.damageThisTurn}`;
   }
 

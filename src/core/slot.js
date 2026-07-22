@@ -1,4 +1,4 @@
-import { getCardDef, CARD_TYPE } from './CardLibrary.js';
+import { getCardDef } from './CardLibrary.js';
 import { TUNING } from '../config/tuning.js';
 
 /**
@@ -35,19 +35,9 @@ export function spinReels(rng, tuning = TUNING) {
   return [pickSymbol(rng, w), pickSymbol(rng, w), pickSymbol(rng, w)];
 }
 
-/** 牌組中「攻擊牌」的索引（附魔只對攻擊牌有意義） */
-function attackIndexes(deck) {
-  const out = [];
-  deck.forEach((spec, i) => {
-    if (getCardDef(spec.defId).type === CARD_TYPE.ATTACK) out.push(i);
-  });
-  return out;
-}
-
 /**
  * 依三個符號算出獎勵描述（不套用，交給 applySlotReward）。
- * 需要 run 是因為「附魔」要挑一張牌組裡的攻擊牌當目標。
- * @returns { kind:'coins'|'card'|'enchant'|'dud', ...細節, label }
+ * @returns { kind:'coins'|'card'|'dud', ...細節, label }
  */
 export function resolveSlotReward(reels, run, rng, tuning = TUNING) {
   const slot = tuning.run.slot;
@@ -60,23 +50,14 @@ export function resolveSlotReward(reels, run, rng, tuning = TUNING) {
     if (trip === 'dud') return { kind: 'dud', label: '三囧…槓龜' };
     if (trip === 'coin') return { kind: 'coins', amount: jp, label: `三金！＋${jp} 銀兩` };
     if (trip === 'gourd') return { kind: 'coins', amount: jp, label: `葫蘆大獎！＋${jp} 銀兩` };
+    if (trip === 'poison' || trip === 'fire') {
+      return { kind: 'coins', amount: jp, label: `三${SLOT_SYMBOL_LABEL[trip]}！＋${jp} 銀兩` };
+    }
     if (trip === 'sword') {
       const pool = slot.rewardCardPool;
       const defId = pool[Math.floor(rng() * pool.length)];
       return { kind: 'card', defId, label: `三劍！獲得【${getCardDef(defId).name}】` };
     }
-    // poison / fire → 牌組某攻擊牌附魔（給 level，實際層數出牌時按傷害算）
-    const targets = attackIndexes(run.deck);
-    if (!targets.length) return { kind: 'coins', amount: slot.pairCoins, label: `＋${slot.pairCoins} 銀兩` };
-    const idx = targets[Math.floor(rng() * targets.length)];
-    const zh = jp.status === 'poison' ? '毒' : '火';
-    return {
-      kind: 'enchant',
-      targetIndex: idx,
-      statusId: jp.status,
-      level: jp.level,
-      label: `三${SLOT_SYMBOL_LABEL[trip]}！【${getCardDef(run.deck[idx].defId).name}】附${zh} Lv${jp.level}`,
-    };
   }
 
   const pair = SLOT_SYMBOLS.find((s) => counts[s] === 2);
@@ -99,9 +80,6 @@ export function applySlotReward(run, reward) {
       break;
     case 'card':
       run.addDeckCard(reward.defId);
-      break;
-    case 'enchant':
-      run.enchantDeckCard(reward.targetIndex, reward.statusId, reward.level);
       break;
     case 'dud':
     default:

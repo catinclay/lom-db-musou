@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { makeMenuButton } from '../ui/menuChrome.js';
+import { transitionIn, transitionTo } from '../ui/sceneTransitions.js';
 
 /** 開機主題畫面。只負責定調與進入據點，不建立 run。 */
 export class TitleScene extends Phaser.Scene {
@@ -33,7 +34,7 @@ export class TitleScene extends Phaser.Scene {
       .text(565, 350, '唐\n門', { fontFamily: 'serif', fontSize: '20px', color: '#f2dfc3', align: 'center', lineSpacing: 4 })
       .setOrigin(0.5);
 
-    const start = () => this.scene.start('Base');
+    const start = () => transitionTo(this, 'Base');
     makeMenuButton(this, {
       x: 815, y: 505, w: 330, h: 78, label: '開始遊戲', sub: '進入唐門據點',
       fill: 0x3f4642, border: 0x7d3930, onClick: start, fontSize: 27,
@@ -43,6 +44,8 @@ export class TitleScene extends Phaser.Scene {
     this.add
       .text(34, 866, '同人作品 · 開發版本', { fontFamily: 'sans-serif', fontSize: '13px', color: '#716e64' })
       .setOrigin(0, 0.5);
+
+    transitionIn(this);
   }
 
   drawInkTitleBackdrop() {

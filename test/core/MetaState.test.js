@@ -71,9 +71,9 @@ describe('據點升級疊進新 run', () => {
     expect(r.money).toBe(base().money + 60);
   });
 
-  it('渾厚內力：起始內力上限 +1', () => {
+  it('渾厚內力：起始內力上限 +1 格', () => {
     const r = runWith({ innerQi: 1 });
-    expect(r.attrs.energyPerTurn).toBe(TUNING.energyPerTurn + 1);
+    expect(r.attrs.energyPerTurn).toBe(TUNING.energyPerTurn + TUNING.energyUnit);
   });
 
   it('祖傳絕學：牌組多帶貫', () => {
@@ -87,6 +87,6 @@ describe('據點升級疊進新 run', () => {
 
   it('傳家寶：起始帶一件遺物', () => {
     const r = runWith({ treasure: 1 });
-    expect(r.relics.length).toBe(1);
+    expect(r.relics.length).toBe(TUNING.run.startingRelics.length + 1);
   });
 });

@@ -1,29 +1,29 @@
 import Phaser from 'phaser';
-import { canFormlessMerge } from '../core/MergeEngine.js';
-import { FORMLESS_COLOR } from './format.js';
+import { canWangxingPump } from '../core/MergeEngine.js';
+import { WANGXING_COLOR } from './format.js';
 
 const ARROW_PLAY = 0xc4583f;
-const ARROW_MERGE = FORMLESS_COLOR;
+const ARROW_PUMP = WANGXING_COLOR;
 const ARROW_INVALID = 0x555555;
 
-const MODE = { NONE: 'none', PLAY: 'play', MERGE: 'merge', INVALID: 'invalid' };
+const MODE = { NONE: 'none', PLAY: 'play', PUMP: 'pump', INVALID: 'invalid' };
 
 /**
  * 拖曳與箭頭。
  *
  * 全作只有一個手勢：從牌上拉出箭頭。**落點決定行為** ——
  *   落在戰場   ＝ 出牌
- *   落在手牌   ＝ 忘形合成（落點即主體）
+ *   忘形落在手牌 ＝ 令目標階級 +1
  * 不需要模式切換，也不需要額外 UI。箭頭尖端就是玩家做決定的地方，
  * 所以箭頭本身必須是視覺主角：牌只是微微抬起留在原位，動的是箭頭。
  */
 export class DragController {
-  constructor(scene, handView, { battlefieldY, onPlay, onMerge, getCard }) {
+  constructor(scene, handView, { battlefieldY, onPlay, onPump, getCard }) {
     this.scene = scene;
     this.hand = handView;
     this.battlefieldY = battlefieldY;
     this.onPlay = onPlay;
-    this.onMerge = onMerge;
+    this.onPump = onPump;
     this.getCard = getCard;
 
     this.arrow = scene.add.graphics().setDepth(5000);
@@ -56,7 +56,7 @@ export class DragController {
     this.updateHighlight(target);
 
     const color =
-      this.mode === MODE.MERGE ? ARROW_MERGE : this.mode === MODE.PLAY ? ARROW_PLAY : ARROW_INVALID;
+      this.mode === MODE.PUMP ? ARROW_PUMP : this.mode === MODE.PLAY ? ARROW_PLAY : ARROW_INVALID;
 
     // 箭頭從牌的上緣出發，不從中心 —— 中心會被牌自己遮住
     this.drawArrow(source.x, source.y - source.h / 2, pointer.worldX, pointer.worldY, color);
@@ -75,8 +75,8 @@ export class DragController {
     this.mode = MODE.NONE;
     this.hoverTargetUid = null;
 
-    if (mode === MODE.MERGE && target) {
-      this.onMerge?.(draggedUid, target.card.uid);
+    if (mode === MODE.PUMP && target) {
+      this.onPump?.(draggedUid, target.card.uid);
     } else if (mode === MODE.PLAY) {
       this.onPlay?.(draggedUid);
     }
@@ -90,7 +90,7 @@ export class DragController {
     if (target) {
       const dragged = this.getCard(this.dragUid);
       const other = this.getCard(target.card.uid);
-      return canFormlessMerge(dragged, other) ? MODE.MERGE : MODE.INVALID;
+      return canWangxingPump(dragged, other) ? MODE.PUMP : MODE.INVALID;
     }
     if (pointer.worldY < this.battlefieldY) return MODE.PLAY;
     return MODE.INVALID;
@@ -114,7 +114,7 @@ export class DragController {
 
     this.clearHighlights();
     this.hoverTargetUid = uid;
-    if (target && this.mode === MODE.MERGE) target.setHighlight(true, ARROW_MERGE);
+    if (target && this.mode === MODE.PUMP) target.setHighlight(true, ARROW_PUMP);
   }
 
   clearHighlights() {

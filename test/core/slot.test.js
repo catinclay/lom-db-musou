@@ -37,15 +37,14 @@ describe('resolveSlotReward — 三連大獎', () => {
     expect(TUNING.run.slot.rewardCardPool).toContain(r.defId);
   });
 
-  it('三毒 → 牌組某攻擊牌附中毒（給 level）', () => {
+  it('三毒 → 銀兩', () => {
     const r = resolveSlotReward(['poison', 'poison', 'poison'], run(), constRng(0), TUNING);
-    expect(r).toMatchObject({ kind: 'enchant', statusId: 'poison', level: TUNING.run.slot.jackpot.poison.level });
-    expect(r.targetIndex).toBeGreaterThanOrEqual(0);
+    expect(r).toMatchObject({ kind: 'coins', amount: TUNING.run.slot.jackpot.poison });
   });
 
-  it('三火 → 附燃燒（給 level）', () => {
+  it('三火 → 銀兩', () => {
     const r = resolveSlotReward(['fire', 'fire', 'fire'], run(), constRng(0), TUNING);
-    expect(r).toMatchObject({ kind: 'enchant', statusId: 'burn', level: TUNING.run.slot.jackpot.fire.level });
+    expect(r).toMatchObject({ kind: 'coins', amount: TUNING.run.slot.jackpot.fire });
   });
 
   it('三囧 → 槓龜', () => {
@@ -80,13 +79,6 @@ describe('applySlotReward', () => {
     applySlotReward(r, { kind: 'card', defId: 'anqi' });
     expect(r.deck).toHaveLength(n + 1);
     expect(r.deck[r.deck.length - 1].defId).toBe('anqi');
-  });
-
-  it('enchant 疊 level 到牌組指定牌的 enchants', () => {
-    const r = run();
-    const idx = r.deck.findIndex((s) => s.defId === 'hengPi');
-    applySlotReward(r, { kind: 'enchant', targetIndex: idx, statusId: 'burn', level: 3 });
-    expect(r.deck[idx].enchants).toEqual({ burn: 3 });
   });
 
   it('dud 什麼都不動', () => {

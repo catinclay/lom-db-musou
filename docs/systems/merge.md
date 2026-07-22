@@ -1,53 +1,41 @@
-# 合成規則（改平衡前先讀懂）
+# 階級、合成與忘形
 
-> 相關：[combat](combat.md)（招式鎖定怎麼吃附魔）、[combo](combo.md)（連段）、[status](status.md)（附魔上的 DoT）。
-> 檔案責任見 [../file-map.md](../file-map.md)；改東西的入口見 [../changing-things.md](../changing-things.md)。
+> 相關：[combo](combo.md)（境界／連擊）、[combat](combat.md)（多波招式）、[status](status.md)（卡片自身狀態）。
 
-現行合成是**同階才能併**（類似 2048）：
+卡片實例以 `rank` 表示**階級**。階級只活在單場戰鬥；每次 `BattleState.start()` 都由 run 的 deck list 重新建立基礎牌，因此不跨戰滾雪球。
 
-- **境界軸**：兩張要**同境界**才能合成（劈一＋劈一→劈二，但劈二＋劈一**不**合成）。
-- **合成結果境界只 +1**（不是相加）：兩張境界 N → 一張境界 N+1。
-- **境界上限**（`tuning.maxRealm`，預設 5）：**擋下合成**而非合成後夾住 —— 到頂的牌不再併（兩張境界五不合成，忘形也吃不動境界五）。判定在 `MergeEngine.atRealmCap`。
-- **數值隨境界成長，但曲線逐卡可換**：傷害/護甲**預設**吃 `tuning.realmDamageCurve`（索引＝境界−1，預設 `[1, 1.5, 2.5, 4, 6]`＝100/150/250/400/600%，高境界回報遞增；帶小數故每發**取整**）。功能牌（內力、抽牌）刻意走**線性**（`GROWTH.linear`/`step`），否則境界一升就強度爆炸（運氣調息境界三只 +3、臨機應變境界三只抽 4）。
-- **名字軸**：正常只能**同名**合成。
+## 自動合成
 
-兩種卡：
+- 只有**同名、同階級**的兩張牌會自動合成：階級 N ＋階級 N → 階級 N+1。
+- 合成結果是新物件、新 uid；tag 取聯集，材料不會被就地修改。
+- `tuning.maxRank`（預設 5）是自動合成上限；到頂牌不再自動合成。`null` 表示無上限。
+- `resolveAutoMerges` 由左到右反覆找第一組配對，直到不動點；補到的牌也會繼續引爆連鎖。
+- 每次真正合成獲得 **2 點靈感**。靈感每滿 **3 點**立即抽一張，超出的餘數保留；靈感跨回合保留、每場戰鬥重新歸零。數值在 `tuning.inspiration`。
+- transcript 將靈感拆成**一點一個 `INSPIRATION`**；每個第三點後立即穿插一個 `DRAW`／`DRAW_FIZZLE`。UI 因此能逐顆點亮、滿三顆提示抽牌，再繼續下一輪，而不是直接跳到最終餘數。
+- 每發傷害、護甲與卡片自身狀態層數查 `tuning.rankCurve`（預設 `[1, 1.5, 2.5, 4, 6]`）。功能牌每次施放的產量改走 `tuning.skillResourceCurve`（預設 `[3, 4, 5, 6, 7]`）。
 
-| 卡種 | 是什麼 | 合成行為 |
-|------|--------|---------|
-| 普通卡 | 具體 defId ＋ 境界 | 只跟「同名同境界」的卡自動合成，結果境界 +1。 |
-| 忘形催化劑（`wangXing`） | 獨立卡，**不帶境界**（realmless）、無戰鬥數值、不能出牌 | 拖到**任一張**牌上（同名/跨名皆可），讓那張牌**境界 +1**，並把**忘形附魔印進**那張牌（見下「附魔」）。不改名、不參與自動合成。 |
+## 忘形的兩種用法
 
-- **自動合成**（`resolveAutoMerges` / `findFirstAutoMergePair`）：同 defId ＋ 同 realm，realmless 排除。結果 realm ＝ **主體境界 +1**。
-- **玩家拖曳合成**（`applyFormlessMerge`）：`canFormlessMerge` 判定，`pickBodyMaterial` 分主體/材料。
-- **忘形＝跨境界催化劑**（`MergeEngine.isCatalyst` ＝ realmless 或帶忘形 tag）：帶忘形的具體卡當材料時
-  **無視境界差、跨名**、把對方 **+1**、自己被消耗、附魔倒進對方（例：境界四忘形卡拖到境界一 → 境界二）。
-  主體境界基準取「非催化劑那張」，材料的境界不算數。忘形 tag 取聯集**一律保留**（不佔上限、可持續跨名）。
+忘形（`wangXing`）是一張可出的無階級技能牌，不再是 catalyst，也沒有可遷移 tag。
 
-## 「卡片自身效果」 vs 「附魔」（兩回事，別混）
+1. **打出：返璞歸真**
+   - `ComboTracker.forgetForm()` 把角色境界歸零，連擊保留。
+   - 不進連擊、不造成傷害，`cost = 0`。
+   - 本場消耗到 `BattleState.exhaustPile`，不進棄牌堆；下一場由 deck list 重建後自然回來。
+   - transcript 產生 `EXHAUST`，UI 以原地上浮、縮小、淡出呈現，不飛向棄牌堆。
+2. **拖到具體牌上：升一階**
+   - `applyWangxingPump` 讓目標 `rank + 1`，產出新 uid；可突破 `maxRank`。
+   - 忘形本場消耗，不進棄牌堆；不能施放到忘形。
+   - 升階本身視同一次合成：增加 `mergesThisTurn` 並獲得 2 點靈感。
+   - 升階後會接 `resolveAutoMerges`；若湊成同名同階，每次後續合成都會繼續累計次數並各給 2 點靈感。
+   - transcript 先產生忘形的 `EXHAUST`，再以 `RANK_UP` 將目標替換成新 uid，接著播放 `INSPIRATION`、滿格抽牌與自動合成劇本。
 
-- **卡片自身狀態效果**：卡定義的 `effectStatus: { id, stacks }`（毒霧的毒、火藥的火）。`stacks` 是境界一
-  基礎值；每波層數吃 `realmDamageCurve`（基礎 3 → 3/5/8/12/18），連段增加施放波數。效果綁 defId，
-  **不進 enchants、不佔上限、不隨合成轉移**。這兩張已**移除直接傷害**（`base` 無 `damage`），純上狀態。
-- **附魔（enchants）**：**外加**的魔（拉霸/商店/事件/合成而來），實例層資料 `card.enchants = { 狀態id: level }`。
-  存的是 **level**（不是層數）；合成時匯總兩張、受**上限** `tuning.enchantCap(realm)`＝2^(境界−1) 約束，
-  超過就展開成單位隨機篩到上限（`Card.combineEnchantsCapped`，吃 rng）。level-2 ＝ 2 個單位，算兩格。
+## 初始補償
 
-**附魔實際上幾層是出牌時「按傷害動態算」**（`BattleState.playCard`）：
+每局開局自帶遺物**靈犀玉**：每場戰鬥開始獲得 2 點靈感。因此前兩次合成的節奏是 `2 → 4（抽 1、留 1）→ 3（抽 1、留 0）`，避免開場自動合成先吃掉手牌卻沒有補牌的虧損感。
 
-```
-層數 = round( 卡每發「基礎傷」 × def.enchantScale × level )
-```
+## 卡片自身狀態
 
-實際層數由 `BattleState.enchantStacks(def, realm, statusId, level)` 算，三條路（由專到泛）：
-1. 卡自訂 `def.enchantStacks(id, level, ctx)` —— 完全客製。
-2. 附魔與卡自身 `effectStatus` **同種**（如毒霧的毒附魔）：**放大自身效果** ＝
-   `境界縮放後的 statusStacks × level`（附魔本身不吃連段；疊在卡自身效果之上，level1 ⇒ 共 2 倍、
-   level2 ⇒ 3 倍…），解決「無傷害卡裝不了附魔」。
-3. 一般傷害卡：`round(每發基礎傷 × enchantScale × level)`。基礎傷 ＝ `resolveEffect(def, realm, 1).damage`，
-   吃**境界**、不吃連段/暫時 buff。`enchantScale` 每卡自訂（貫 0.15 > 橫劈 0.08；單體未來約 0.2），沒寫走 `tuning.combat.enchantScaleDefault`。
+毒霧／火藥用 `effectStatus: { id, stacks }` 表示卡片自身效果。每波層數吃 `rankCurve`，連擊增加獨立施放波數；它綁在卡定義上，不隨合成轉移。
 
-卡面左緣彩色小點（`CardSprite.refreshEnchants`）顯示附魔的顏色與 level。
-
-出牌時會先 tick 敵人身上的既有狀態，再套用本張牌的自身狀態與附魔；因此剛施加的層數當次不會立刻衰減
-或成長，敵人頭上會先顯示與卡面一致的完整層數。
+舊的 `card.enchants`、附魔上限、附魔獎勵與卡面色條已移除。出牌仍會先 tick 敵人既有狀態，再套用本張牌的 `effectStatus`，所以新狀態首次 tick 會延到下一次出牌。

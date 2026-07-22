@@ -4,9 +4,11 @@ import { CARD_DEFS } from '../core/CardLibrary.js';
 import { EVENT_DEFS } from '../core/EventLibrary.js';
 import { META_UPGRADE_IDS, getUpgrade } from '../core/MetaState.js';
 import { RELIC_DEFS } from '../core/RelicLibrary.js';
-import { CARD_COLORS } from '../ui/format.js';
+import { CARD_COLORS, energyPips } from '../ui/format.js';
+import { TUNING } from '../config/tuning.js';
 import { loadMeta, saveMeta } from '../ui/metaStore.js';
 import { addMenuHeader, drawMenuBackdrop, makeMenuButton } from '../ui/menuChrome.js';
+import { transitionIn, transitionTo } from '../ui/sceneTransitions.js';
 
 const HEADERS = {
   achievements: ['功名碑', '已解鎖成就與尚待完成的江湖功名'],
@@ -17,7 +19,7 @@ const HEADERS = {
   relics: ['秘寶庫', '目前版本的已知遺物總表'],
 };
 
-const TYPE_LABEL = { attack: '攻擊', defense: '防禦', skill: '技能', catalyst: '催化' };
+const TYPE_LABEL = { attack: '攻擊', defense: '防禦', skill: '技能' };
 
 /** 據點內各設施的內容頁。共用一個場景，資料仍由各 core Library 提供。 */
 export class FacilityScene extends Phaser.Scene {
@@ -28,7 +30,8 @@ export class FacilityScene extends Phaser.Scene {
   create(data) {
     this.facility = data?.facility;
     if (!HEADERS[this.facility]) {
-      this.scene.start('Base');
+      transitionIn(this);
+      transitionTo(this, 'Base');
       return;
     }
     this.meta = loadMeta();
@@ -38,7 +41,7 @@ export class FacilityScene extends Phaser.Scene {
     addMenuHeader(this, ...HEADERS[this.facility]);
     makeMenuButton(this, {
       x: 115, y: 58, w: 160, h: 50, label: '返回據點', fill: 0x1d2427, border: 0x64747a,
-      onClick: () => this.scene.start('Base'), fontSize: 18,
+      onClick: () => transitionTo(this, 'Base'), fontSize: 18,
     });
 
     switch (this.facility) {
@@ -49,6 +52,7 @@ export class FacilityScene extends Phaser.Scene {
       case 'events': this.renderEvents(); break;
       case 'relics': this.renderRelics(); break;
     }
+    transitionIn(this);
   }
 
   renderAchievements() {
@@ -215,7 +219,7 @@ export class FacilityScene extends Phaser.Scene {
       this.add.text(x - 170, y - 48, def.name, {
         fontFamily: 'sans-serif', fontSize: '24px', color: color.text, fontStyle: 'bold',
       }).setOrigin(0, 0.5);
-      this.add.text(x + 170, y - 48, `${TYPE_LABEL[def.type] ?? def.type} · 內力 ${def.cost}`, {
+      this.add.text(x + 170, y - 48, `${TYPE_LABEL[def.type] ?? def.type} · 內力 ${energyPips(def.cost, TUNING.energyUnit)}`, {
         fontFamily: 'sans-serif', fontSize: '14px', color: '#d7c8b1',
       }).setOrigin(1, 0.5);
       this.add.text(x, y + 18, def.desc ?? '尚無說明', {

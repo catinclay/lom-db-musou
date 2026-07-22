@@ -1,14 +1,23 @@
 import Phaser from 'phaser';
-import { RunState } from '../core/RunState.js';
+import { GAME_ACTION, GameSession } from '../core/GameSession.js';
 import { getCardDef } from '../core/CardLibrary.js';
 import { getRelicDef } from '../core/RelicLibrary.js';
 import { DeckOverlay } from '../ui/DeckOverlay.js';
+import { transitionIn } from '../ui/sceneTransitions.js';
+import { transitionToSessionPhase } from '../ui/sessionNavigation.js';
+import { stopTweensOf, tweenTo } from '../ui/tweens.js';
 
 /**
- * 客棧（白天池中的 'inn' 節點）：買招式、歇息回血、刪去一招，也能拉霸。
- * 交易全走 RunState（buyShopCard / restAtInn / buyRemoveCard）；這裡只畫面板與接點擊。
+ * 白天服務設施共用畫面。客棧、商販、武館、賭坊各自只呈現自己的功能。
+ * 交易全走 GameSession action；這裡只畫面板、送 action、刷新呈現。
  */
 const OFFER_X = [450, 800, 1150];
+const SERVICE_VIEW = Object.freeze({
+  inn: { title: '🏮 客棧', intro: '熱茶已沏，房內也收拾乾淨了。要不要歇口氣？' },
+  merchant: { title: '🧳 江湖商販', intro: '南來北往的招式與奇物，都攤在這張舊布上。' },
+  dojo: { title: '🥋 武館', intro: '師傅翻過你的招式簿：「雜念太多，何不捨去一招？」' },
+  casino: { title: '🎰 賭坊', intro: '銅輪喀啦作響。懷裡的代幣，似乎也跟著發燙。' },
+});
 
 export class ShopScene extends Phaser.Scene {
   constructor() {
@@ -16,49 +25,67 @@ export class ShopScene extends Phaser.Scene {
   }
 
   create(data) {
-    this.run = data?.run ?? new RunState();
-    this.shop = data?.shop ?? this.run.generateShop();
+    this.session = data?.session ?? new GameSession({ run: data?.run });
+    this.run = this.session.run;
+    this.shop = this.session.context.shop ?? data?.shop ?? this.run.generateShop('merchant');
+    this.service = this.shop.service ?? 'merchant';
     this.offerObjs = [];
     this.relicObjs = [];
+    const view = SERVICE_VIEW[this.service] ?? SERVICE_VIEW.merchant;
 
     this.cameras.main.setBackgroundColor('#1a140e');
-    this.add.text(800, 70, '🏮 客棧', {
+    this.add.text(800, 70, view.title, {
       fontFamily: 'sans-serif', fontSize: '42px', color: '#f0dda0', fontStyle: 'bold',
     }).setOrigin(0.5);
 
     this.status = this.add
       .text(800, 130, '', { fontFamily: 'sans-serif', fontSize: '22px', color: '#d8c9a8' })
       .setOrigin(0.5);
-    this.add.text(800, 210, '買招式', { fontFamily: 'sans-serif', fontSize: '20px', color: '#9c8a70' }).setOrigin(0.5);
+    this.add.text(800, 190, view.intro, {
+      fontFamily: 'sans-serif', fontSize: '20px', color: '#c9b896',
+      align: 'center', wordWrap: { width: 900 },
+    }).setOrigin(0.5);
 
-    // 服務列（建一次，refresh 只調可用度）
-    this.restBtn = this.makeButton(430, 660, 260, 66,
-      `歇息回血（−${this.shop.rest.price}，＋${this.shop.rest.heal}）`, 0x24445c, 0x4a8fb8,
-      () => this.doRest());
-    this.removeBtn = this.makeButton(720, 660, 240, 66,
-      `刪去一招（−${this.shop.removePrice}）`, 0x5c2c2c, 0xc4583f,
-      () => this.openRemovePicker());
-    this.slotBtn = this.makeButton(985, 660, 200, 66, '拉霸機 🎰', 0x4a2c5c, 0x9b6cc0,
-      () => this.goSlot());
-    this.makeButton(1210, 660, 160, 66, '離開', 0x3a2f22, 0xd9b45c, () => this.leave());
+    if (this.service === 'merchant') {
+      this.add.text(800, 235, '挑一件合眼緣的', {
+        fontFamily: 'sans-serif', fontSize: '18px', color: '#9c8a70',
+      }).setOrigin(0.5);
+    } else if (this.service === 'inn') {
+      this.restBtn = this.makeButton(800, 500, 420, 82,
+        '歇息回血（−' + this.shop.rest.price + '，＋' + this.shop.rest.heal + '）', 0x24445c, 0x4a8fb8,
+        () => this.doRest());
+    } else if (this.service === 'dojo') {
+      this.removeBtn = this.makeButton(800, 500, 380, 82,
+        '刪去一招（−' + this.shop.removePrice + '）', 0x5c2c2c, 0xc4583f,
+        () => this.openRemovePicker());
+    } else if (this.service === 'casino') {
+      this.slotBtn = this.makeButton(800, 500, 340, 82, '投入代幣', 0x4a2c5c, 0x9b6cc0,
+        () => this.goSlot());
+    }
 
-    this.viewBtn = this.makeButton(230, 130, 200, 52, '檢視牌組', 0x2c4a30, 0x5aa06a,
-      () => new DeckOverlay(this, this.run, { mode: 'view', title: '目前牌組' }));
-
+    this.makeButton(800, 680, 180, 66, '離開', 0x3a2f22, 0xd9b45c, () => this.leave());
+    if (this.service === 'merchant' || this.service === 'dojo') {
+      this.viewBtn = this.makeButton(230, 130, 200, 52, '檢視牌組', 0x2c4a30, 0x5aa06a,
+        () => new DeckOverlay(this, this.run, { mode: 'view', title: '目前牌組' }));
+    }
     this.msg = this.add
       .text(800, 740, '', { fontFamily: 'sans-serif', fontSize: '20px', color: '#f0dda0' })
       .setOrigin(0.5);
 
     this.refresh();
+    transitionIn(this);
   }
 
   refresh() {
     const r = this.run;
     this.status.setText(`銀兩 ${r.money}　　血量 ${r.hp}/${r.maxHp}　　代幣 ${r.slotTokens}`);
-    this.restBtn.setAlpha(r.money >= this.shop.rest.price && r.hp < r.maxHp ? 1 : 0.45);
-    this.removeBtn.setAlpha(r.money >= this.shop.removePrice && r.deck.length > 1 ? 1 : 0.45);
-    this.renderOffers();
-    this.renderRelicOffer();
+    this.restBtn?.setAlpha(r.money >= this.shop.rest?.price && r.hp < r.maxHp ? 1 : 0.45);
+    this.removeBtn?.setAlpha(r.money >= this.shop.removePrice && r.deck.length > 1 ? 1 : 0.45);
+    this.slotBtn?.setAlpha(r.slotTokens > 0 ? 1 : 0.45);
+    if (this.service === 'merchant') {
+      this.renderOffers();
+      this.renderRelicOffer();
+    }
   }
 
   renderRelicOffer() {
@@ -95,7 +122,7 @@ export class ShopScene extends Phaser.Scene {
   }
 
   buyRelicClick() {
-    if (this.run.buyRelic(this.shop)) this.flash(`入手遺物：${getRelicDef(this.shop.relic.id).name}`);
+    if (this.session.dispatch(GAME_ACTION.BUY_RELIC).ok) this.flash(`入手遺物：${getRelicDef(this.shop.relic.id).name}`);
     else this.flash('銀兩不足');
     this.refresh();
   }
@@ -140,7 +167,7 @@ export class ShopScene extends Phaser.Scene {
   }
 
   buy(i) {
-    if (this.run.buyShopCard(this.shop, i)) {
+    if (this.session.dispatch(GAME_ACTION.BUY_CARD, { index: i }).ok) {
       this.flash(`買下【${getCardDef(this.shop.cards[i].defId).name}】`);
     } else {
       this.flash('銀兩不足');
@@ -149,7 +176,7 @@ export class ShopScene extends Phaser.Scene {
   }
 
   doRest() {
-    if (this.run.restAtInn(this.shop)) this.flash('歇了口氣，回了些血');
+    if (this.session.dispatch(GAME_ACTION.REST).ok) this.flash('歇了口氣，回了些血');
     else this.flash(this.run.hp >= this.run.maxHp ? '已是滿血' : '銀兩不足');
     this.refresh();
   }
@@ -163,24 +190,28 @@ export class ShopScene extends Phaser.Scene {
       title: `刪去哪一招？（−${this.shop.removePrice} 銀兩）`,
       confirmLabel: '刪去',
       onConfirm: (index) => {
-        if (this.run.buyRemoveCard(this.shop, index)) this.flash('刪去一招');
+        if (this.session.dispatch(GAME_ACTION.REMOVE_CARD, { index }).ok) this.flash('刪去一招');
         this.refresh();
       },
     });
   }
 
   goSlot() {
-    this.scene.start('Slot', { run: this.run, back: { scene: 'Shop', data: { run: this.run, shop: this.shop } } });
+    const action = this.session.dispatch(GAME_ACTION.ENTER_SLOT);
+    if (action.ok) transitionToSessionPhase(this, this.session);
+    else this.flash('身上沒有代幣');
   }
 
   leave() {
-    this.scene.start('RunMap', { run: this.run });
+    const action = this.session.dispatch(GAME_ACTION.LEAVE_SHOP);
+    if (action.ok) transitionToSessionPhase(this, this.session);
   }
 
   flash(text) {
+    stopTweensOf(this, this.msg);
     this.msg.setText(text);
     this.msg.setAlpha(1);
-    this.tweens.add({ targets: this.msg, alpha: 0, delay: 900, duration: 600 });
+    void tweenTo(this, { targets: this.msg, alpha: 0, delay: 900, duration: 600 });
   }
 
   makeButton(x, y, w, h, label, fill, border, onClick) {

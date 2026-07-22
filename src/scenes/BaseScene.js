@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
-import { RunState } from '../core/RunState.js';
+import { GameSession } from '../core/GameSession.js';
 import { loadMeta, saveMeta } from '../ui/metaStore.js';
 import { addMenuHeader, drawMenuBackdrop, makeMenuButton } from '../ui/menuChrome.js';
+import { transitionIn, transitionTo } from '../ui/sceneTransitions.js';
 
 const FACILITIES = [
   { id: 'achievements', name: '功名碑', desc: '展示已解鎖成就', icon: '碑', fill: 0x26363b, border: 0x7699a0 },
@@ -36,7 +37,7 @@ export class BaseScene extends Phaser.Scene {
 
     makeMenuButton(this, {
       x: 135, y: 58, w: 190, h: 50, label: '返回主題畫面', fill: 0x1d2427, border: 0x64747a,
-      onClick: () => this.scene.start('Title'), fontSize: 17,
+      onClick: () => transitionTo(this, 'Title'), fontSize: 17,
     });
 
     this.add
@@ -58,7 +59,7 @@ export class BaseScene extends Phaser.Scene {
       const rect = makeMenuButton(this, {
         x, y, w: 370, h: 150, label: facility.name, sub: facility.desc,
         fill: facility.fill, border: facility.border,
-        onClick: () => this.scene.start('Facility', { facility: facility.id }),
+        onClick: () => transitionTo(this, 'Facility', { facility: facility.id }),
         fontSize: 26,
       });
       this.add
@@ -72,8 +73,13 @@ export class BaseScene extends Phaser.Scene {
     makeMenuButton(this, {
       x: 800, y: 735, w: 470, h: 92, label: '開始挑戰', sub: '建立新遠征 · 闖江湖',
       fill: 0x54221e, border: 0xd46349,
-      onClick: () => this.scene.start('RunMap', { run: new RunState({ meta: this.meta }) }),
+      onClick: () => {
+        const session = new GameSession({ meta: this.meta });
+        transitionTo(this, 'RunMap', { session, run: session.run });
+      },
       fontSize: 30,
     });
+
+    transitionIn(this);
   }
 }

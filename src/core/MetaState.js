@@ -23,11 +23,11 @@ export const META_UPGRADES = {
   innerQi: {
     id: 'innerQi',
     name: '渾厚內力',
-    desc: '每局起始內力上限 +1',
+    desc: '每局起始內力 +1 格',
     maxLevel: 2,
     cost: (lvl) => 60 + lvl * 60,
     apply: (run, lvl) => {
-      run.attrs.energyPerTurn += lvl;
+      run.attrs.energyPerTurn += run.tuning.energyUnit * lvl;
     },
   },
   funds: {

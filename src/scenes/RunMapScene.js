@@ -1,20 +1,27 @@
 import Phaser from 'phaser';
-import { RunState } from '../core/RunState.js';
+import { GAME_ACTION, GameSession } from '../core/GameSession.js';
 import { getRelicDef } from '../core/RelicLibrary.js';
 import { getEventDef } from '../core/EventLibrary.js';
 import { DeckOverlay } from '../ui/DeckOverlay.js';
+import { transitionIn } from '../ui/sceneTransitions.js';
+import { transitionToSessionPhase } from '../ui/sessionNavigation.js';
+import { TUNING } from '../config/tuning.js';
+import { energyPips } from '../ui/format.js';
 
 /**
  * 白天的江湖行程（run 的樞紐場景）。
- *   一輪「三選一」：擲 3 個選項給玩家挑 1 個做（battle/elite 開戰、event 進奇遇、inn 進客棧），
- *   做完補下一輪，最多 maxRoundsPerDay 輪。隨時可「入夜決戰」召尾王（提早給速通代幣）。
- * 所有權威狀態都在 RunState；這裡只讀它、把玩家操作轉成 run 的方法呼叫。
+ *   每個時辰「三選一」：擲 3 個選項給玩家挑 1 個做（戰鬥、奇遇或各種服務設施），
+ *   做完推進到下一時辰，最多 maxRoundsPerDay 個時辰。隨時可「入夜決戰」召尾王（提早給速通代幣）。
+ * 所有權威狀態與下一步都由 GameSession 決定；這裡只畫狀態並送 action。
  */
 const KIND_STYLE = {
   battle: { label: '廝殺', color: 0x6b2b25, border: 0xc4583f },
   elite: { label: '精英仇家', color: 0x4a2c5c, border: 0x9b6cc0 },
   event: { label: '奇遇', color: 0x2c4a30, border: 0x5aa06a },
   inn: { label: '客棧', color: 0x5a4520, border: 0xd9b45c },
+  merchant: { label: '江湖商販', color: 0x4c3a24, border: 0xc99655 },
+  dojo: { label: '武館', color: 0x243d48, border: 0x67a2b8 },
+  casino: { label: '賭坊', color: 0x4a2c5c, border: 0x9b6cc0 },
 };
 const BOSS_LABEL = { elite: '今夜小王', boss: '今夜魔王', final: '最終魔王決戰' };
 
@@ -24,8 +31,10 @@ export class RunMapScene extends Phaser.Scene {
   }
 
   create(data) {
-    this.run = data?.run ?? new RunState();
+    this.session = data?.session ?? new GameSession({ run: data?.run });
+    this.run = this.session.run;
     this.nodeObjs = [];
+    this._bossStarting = false;
 
     this.cameras.main.setBackgroundColor('#14100e');
     this.add.rectangle(800, 90, 1600, 180, 0x1c1712).setDepth(-1);
@@ -46,50 +55,61 @@ export class RunMapScene extends Phaser.Scene {
       .text(800, 216, '', { fontFamily: 'sans-serif', fontSize: '16px', color: '#c9a8e0' })
       .setOrigin(0.5);
 
-    // 入夜決戰按鈕（文字由 renderHud 依尾王類別填上，這裡記住它的 text 物件）
-    this.bossBtn = this.makeButton(800, 800, 420, 76, '', 0x5a2020, 0xc4583f, () => this.goBoss());
+    this.run.ensureOffer(); // 補本時辰的三選一（達上限則空）
+
+    // 尚有時辰時是次要出口；時辰用盡後移到中央放大，成為唯一主流程選擇。
+    const bossLayout = this.run.offer?.length
+      ? TUNING.run.mapLayout.bossButton.normal
+      : TUNING.run.mapLayout.bossButton.exhausted;
+    this.bossBtn = this.makeButton(
+      bossLayout.x, bossLayout.y, bossLayout.width, bossLayout.height,
+      '', 0x5a2020, 0xc4583f, () => this.goBoss(), bossLayout.fontSize
+    );
     this.bossTxt = this.bossBtn.txt;
 
     // 隨時檢視本局牌組
     this.makeButton(200, 60, 210, 56, '檢視牌組', 0x2c4a30, 0x5aa06a,
       () => new DeckOverlay(this, this.run, { mode: 'view', title: '目前牌組' }));
 
-    this.run.ensureOffer(); // 補一輪三選一（達上限則空）
-
     this.renderHud();
     this.renderOffer();
+    transitionIn(this);
   }
 
   renderHud() {
     const r = this.run;
-    this.title.setText(`第 ${r.day} 天 · 江湖行程`);
+    const timeLabel = r.roundsLeft > 0 ? `第 ${r.eventsDoneToday + 1} 時辰` : '日暮';
+    this.title.setText(`第 ${r.day} 天 · ${timeLabel}`);
     this.stats.setText(
       `主角 ${r.hp}/${r.maxHp}　　銀兩 ${r.money}　　拉霸代幣 ${r.slotTokens}`
     );
-    this.hint.setText(
-      `今日已探 ${r.eventsDoneToday} 樁（還可 ${r.roundsLeft} 樁）　挑一樁去做；探越多越強，但入夜尾王的敵潮也越大`
-    );
+    this.hint.setText(r.roundsLeft > 0
+      ? `今日已過 ${r.eventsDoneToday} 時辰（尚餘 ${r.roundsLeft} 時辰）　選一處前往；歷練越多越強，但入夜尾王的敵潮也越大`
+      : '夜色已深，今日已無別處可去——整裝迎戰。');
     const bk = r.dayBossKind();
     this.bossTxt?.setText(`入夜決戰 — ${BOSS_LABEL[bk] ?? bk}`);
 
     const a = r.attrs;
-    this.attrText.setText(`境界上限 ${a.maxRealm}　內力 ${a.energyPerTurn}　起手 ${a.startingHandSize}`);
+    this.attrText.setText(
+      `階級上限 ${a.maxRank}　內力 ${energyPips(a.energyPerTurn, this.session.tuning.energyUnit)}　起手 ${a.startingHandSize}`
+    );
 
     const relics = r.relics.map((id) => getRelicDef(id).name);
     this.relicText.setText(relics.length ? `遺物：${relics.join('　')}` : '遺物：（無）');
   }
 
-  /** 本輪三選一：三張並排的選項卡，點一張去做。offer 為空（達上限）＝只能入夜。 */
+  /** 本時辰三選一：三張並排的選項卡，點一張去做。offer 為空（達上限）＝只能入夜。 */
   renderOffer() {
     for (const o of this.nodeObjs) o.destroy();
     this.nodeObjs = [];
 
     const offer = this.run.offer ?? [];
     if (!offer.length) {
+      const prompt = TUNING.run.mapLayout.exhaustedPrompt;
       this.nodeObjs.push(
         this.add
-          .text(800, 460, '今日事件已盡 —— 該入夜決戰了。', {
-            fontFamily: 'sans-serif', fontSize: '26px', color: '#d9b45c', fontStyle: 'bold',
+          .text(prompt.x, prompt.y, '今日時辰已盡', {
+            fontFamily: 'sans-serif', fontSize: `${prompt.fontSize}px`, color: '#d9b45c', fontStyle: 'bold',
           })
           .setOrigin(0.5)
       );
@@ -134,41 +154,41 @@ export class RunMapScene extends Phaser.Scene {
   }
 
   offerSub(node) {
-    if (node.kind === 'event') return '（奇遇 · 有選項）';
-    if (node.kind === 'elite') return '（硬仗 · 較好報酬）';
-    if (node.kind === 'inn') return '（買招 · 歇息 · 刪牌 · 拉霸）';
-    return '（尋常廝殺）';
+    if (node.kind === 'event') return '路上似乎發生了什麼……';
+    if (node.kind === 'elite') return '前方傳來兵刃交擊之聲';
+    if (node.kind === 'inn') return '燈火溫暖，正好歇口氣';
+    if (node.kind === 'merchant') return '貨擔上壓著招式與奇物';
+    if (node.kind === 'dojo') return '師傅願替你梳理所學';
+    if (node.kind === 'casino') return '銅輪聲從簾後喀啦作響';
+    return '幾名江湖人擋住了去路';
   }
 
   pick(index) {
-    const res = this.run.takeOffer(index);
-    if (!res) return;
-    if (res.type === 'battle') {
-      this.scene.start('Battle', { run: this.run, config: res.config });
-    } else if (res.type === 'inn') {
-      this.scene.start('Shop', { run: this.run, shop: res.shop });
-    } else if (res.type === 'event') {
-      this.scene.start('Event', { run: this.run, node: res.node, event: res.event });
-    }
+    const res = this.session.dispatch(GAME_ACTION.CHOOSE_OFFER, { index });
+    if (res.ok) transitionToSessionPhase(this, this.session);
   }
 
   goBoss() {
-    const res = this.run.callBoss();
+    if (this._bossStarting) return;
+    this._bossStarting = true;
+    this.input.enabled = false;
+    const res = this.session.dispatch(GAME_ACTION.CALL_BOSS);
+    if (!res.ok) return;
     if (res.speedrunTokens > 0) {
       this.flash(`速通！拉霸代幣 ＋${res.speedrunTokens}`, 0xd9b45c);
-      this.time.delayedCall(650, () => this.scene.start('Battle', { run: this.run, config: res.config }));
+      this.time.delayedCall(650, () => transitionToSessionPhase(this, this.session));
     } else {
-      this.scene.start('Battle', { run: this.run, config: res.config });
+      transitionToSessionPhase(this, this.session);
     }
   }
 
-  makeButton(x, y, w, h, label, fill, border, onClick) {
+  makeButton(x, y, w, h, label, fill, border, onClick, fontSize = 24) {
     const rect = this.add
       .rectangle(x, y, w, h, fill, 1)
       .setStrokeStyle(3, border)
       .setInteractive({ useHandCursor: true });
     const txt = this.add
-      .text(x, y, label, { fontFamily: 'sans-serif', fontSize: '24px', color: '#f5e6c8', fontStyle: 'bold' })
+      .text(x, y, label, { fontFamily: 'sans-serif', fontSize, color: '#f5e6c8', fontStyle: 'bold' })
       .setOrigin(0.5);
     rect.on('pointerover', () => rect.setStrokeStyle(4, 0xffe1b0));
     rect.on('pointerout', () => rect.setStrokeStyle(3, border));

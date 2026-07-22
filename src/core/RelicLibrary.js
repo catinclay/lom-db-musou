@@ -1,4 +1,5 @@
 import { applyStatus, STATUS } from './StatusLibrary.js';
+import { TUNING } from '../config/tuning.js';
 
 /**
  * 遺物·秘籍：一局內持有的被動加成。零 Phaser。
@@ -12,11 +13,21 @@ import { applyStatus, STATUS } from './StatusLibrary.js';
  * 遺物存在 RunState.relics（只存 id）；BattleState 由 battleConfig.relics 拿到 id 清單解算。
  */
 export const RELIC_DEFS = {
+  lingXiYu: {
+    id: 'lingXiYu',
+    name: '靈犀玉',
+    desc: '戰鬥開始時獲得 2 點靈感',
+    hooks: {
+      onBattleStart: (battle, transcript) => {
+        battle.gainInspiration(2, transcript, 'relic');
+      },
+    },
+  },
   xuanTie: {
     id: 'xuanTie',
     name: '玄鐵令',
-    desc: '每回合內力 +1',
-    battleMods: { energy: 1 },
+    desc: '每回合內力 +1 格',
+    battleMods: { energy: TUNING.energyUnit },
   },
   baiBao: {
     id: 'baiBao',
@@ -36,9 +47,9 @@ export const RELIC_DEFS = {
   wuXing: {
     id: 'wuXing',
     name: '無形劍意',
-    desc: '境界上限 +1（能把牌養得更高）',
+    desc: '階級上限 +1（能把牌養得更高）',
     onAcquire: (run) => {
-      run.attrs.maxRealm += 1;
+      run.attrs.maxRank += 1;
     },
   },
   cuiDu: {

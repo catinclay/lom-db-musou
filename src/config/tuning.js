@@ -5,23 +5,17 @@
 
 export const TUNING = {
   // ── 資源 ──────────────────────────────────────────────
-  energyPerTurn: 3,
+  /** 內力以小格儲存；3 小格在 UI 組成 1 個完整氣輪。 */
+  energyUnit: 3,
+  energyPerTurn: 9,
   startingHandSize: 5,
 
-  // ── 合成補抽 ──────────────────────────────────────────
-  /**
-   * 兩張就能合成，若每次必抽會太強，所以補抽是機率制。
-   *
-   * 機率在「同一回合內」逐次遞減，每回合重置：
-   *   第1次合成 70%、第2次 60%、第3次 50%、第4次 40%、第5次以後 30%
-   *
-   * decayPerMerge 是「百分點」不是相對比例 —— 0.70 − 0.10 = 0.60，
-   * 剛好第 5 次合成觸底 30%。
-   */
-  mergeDraw: {
-    baseChance: 0.7,
-    decayPerMerge: 0.1,
-    minChance: 0.3,
+  // ── 功能牌資源／合成補牌 ──────────────────────────────
+  /** 階級一到五的單次功能牌產量；超階沿用最後一格。 */
+  skillResourceCurve: [3, 4, 5, 6, 7],
+  inspiration: {
+    threshold: 3,
+    perMerge: 2,
   },
 
   /**
@@ -31,42 +25,42 @@ export const TUNING = {
    */
   maxChainGuard: 200,
 
-  /**
-   * 境界上限。null = 不設限。
-   * 到頂的牌**不再合成**（兩張境界 5 不會併，忘形也吃不動境界 5）——
-   * 是「擋下合成」而非「合成後夾住」，所以到頂的牌就停在那不動。
-   */
-  maxRealm: 5,
+  /** 自動合成的階級上限。null = 不設限；忘形施放可突破此上限。 */
+  maxRank: 5,
 
-  /**
-   * 每張卡的**附魔上限**（合成後 enchants 的 level 總和上限）。境界 N → 2^(N−1)：1/2/4/8/16。
-   * 合成匯總兩張的附魔後若超過上限，就把附魔展開成「單位」隨機篩到上限（見 Card.combineEnchantsCapped）。
-   * 二級附魔（level 2）＝ 2 個單位，所以在上限計算裡算兩個。忘形是 tag 不是 enchant，不佔上限。
-   */
-  enchantCap: (realm) => 2 ** Math.max(0, realm - 1),
+  /** 每發傷害／護甲與卡片自身狀態的階級曲線；超出表長沿用最後一格。 */
+  rankCurve: [1, 1.5, 2.5, 4, 6],
 
+  // ── 連擊 ──────────────────────────────────────────────
   /**
-   * 純傷害/護甲牌每發數值隨境界的成長倍率（相對境界一）。
-   * 索引 = 境界−1：境界一 ×1、境界二 ×1.5 …… 境界五 ×6。
-   * 不是等比 —— 高境界回報遞增（100/150/250/400/600%），鼓勵把牌養高。
-   * 超出表長的境界沿用最後一格。功能牌（內力、抽牌）不吃這條，走自己的線性曲線。
-   */
-  realmDamageCurve: [1, 1.5, 2.5, 4, 6],
-
-  // ── 連段（§4 境界連段）────────────────────────────────
-  /**
-   * 線性遞增：第 N 張遞增牌得 ×N。
+   * 線性：連擊 N 得 ×N 次數。
    * 倍率怎麼「用」由每張卡自己決定（見 CardLibrary 的 comboScale）——
    * 劈是傷害變高，暗器是發數變多。
    */
-  comboMultiplier: (step) => step,
+  comboMultiplier: (combo) => combo,
 
   // ── 演出節奏（毫秒）───────────────────────────────────
   anim: {
+    /** Scene 切換統一先淡入墨色、再由墨色淡入新畫面，避免 1 frame 硬切。 */
+    sceneTransition: {
+      fadeOut: 220,
+      fadeIn: 280,
+      color: 0x100c09,
+    },
     mergeCollide: 260,
     mergePop: 180,
     drawFly: 240,
     discardFly: 220,
+    exhaustFade: 260,
+    exhaustRise: 90,
+    exhaustScale: 0.25,
+    rankUpPopScale: 1.25,
+    inspirationStep: 180,
+    inspirationPulseScale: 1.2,
+    inspirationBurstDuration: 280,
+    inspirationCueDuration: 800,
+    inspirationRise: 38,
+    inspirationBurstScale: 2.6,
     handRelayout: 200,
     /** 連鎖中每步之間的間隔，太短會看不清、太長會拖沓 */
     chainStepGap: 90,
@@ -79,7 +73,7 @@ export const TUNING = {
      */
     drawBatchWindow: 110,
 
-    /** 境界連段的多次施放間隔；毒霧／火藥與一般多波招式共用。 */
+    /** 連擊的多次施放間隔；毒霧／火藥與一般多波招式共用。 */
     combatWaveDelay: 240,
     /** 崩山需在每波傷害後演出擊退，間隔略長。 */
     knockbackWaveDelay: 320,
@@ -119,7 +113,7 @@ export const TUNING = {
     elitePool: ['han', 'dingZhuang'],
 
     /** 清空一批敵人時的即時獎勵；每次清場只領一次。 */
-    clearReward: { energy: 1, draw: 1 },
+    clearReward: { energy: 3, draw: 1 },
 
     /** 敵人戰鬥數值與意圖節奏。名字／外觀在 EnemyLibrary。 */
     enemies: {
@@ -158,15 +152,6 @@ export const TUNING = {
       poison: { damagePerStack: 1, decayRate: 0.1, turnEndTicks: 3 },
       burn: { growthRate: 0.2, detonateDamage: 1, decayKeep: 0.34 },
     },
-
-    /**
-     * 附魔（外加，非卡片自身效果）套到敵人身上的層數：
-     *   層數 = round(卡每發「基礎傷害」× enchantScale × 附魔 level)
-     * 基礎傷害＝該卡「境界解算後、未吃連段/暫時 buff」的每發傷（見 BattleState.playCard）——
-     * 所以境界升、傷害升，附魔層數等比升；連段或臨時增傷不影響。
-     * enchantScale 每張卡自訂（打到單位越少的卡給越高，單體約 0.2）；沒寫走這個預設。
-     */
-    enchantScaleDefault: 0.1,
 
     /**
      * 肩後攝影機的投影參數（見 ui/perspective.js）。
@@ -218,12 +203,60 @@ export const TUNING = {
    * reward[kind] = 打贏該類戰鬥給的銀兩。
    */
   run: {
+    startingRelics: ['lingXiYu'],
     finalDay: 10,
     bossEveryDays: 3, // 第 3/6/9 天魔王
-    /** 白天＝一輪輪「三選一」：每輪擲 offer.size 個選項挑 1 個做，最多 maxRoundsPerDay 輪，隨時可入夜。 */
+    /** 白天分成數個「時辰」；每時辰擲 offer.size 個選項挑 1 個做，隨時可入夜。 */
     maxRoundsPerDay: 6,
-    offer: { size: 3, innChance: 0.14, eventChance: 0.42 }, // 其餘為 battle/elite（elite 吃 eliteInPoolChance）
-    eliteInPoolChance: 0.25,
+    /** 行程畫面的入夜決戰焦點：時辰用盡後移到中央並放大，凸顯唯一主流程出口。 */
+    mapLayout: {
+      bossButton: {
+        normal: { x: 800, y: 800, width: 420, height: 76, fontSize: 24 },
+        exhausted: { x: 800, y: 525, width: 640, height: 118, fontSize: 34 },
+      },
+      exhaustedPrompt: { x: 800, y: 395, fontSize: 28 },
+    },
+    /**
+     * 時辰選項導演：先抽內部風險組成，再抽具體內容；UI 不顯示風險標籤。
+     * 權重只決定同一風險池內的相對機率。
+     */
+    offer: {
+      size: 3,
+      patterns: [
+        { risks: ['safe', 'normal', 'normal'], weight: 50 },
+        { risks: ['safe', 'normal', 'dangerous'], weight: 30 },
+        { risks: ['safe', 'safe', 'dangerous'], weight: 15 },
+        { risks: ['safe', 'dangerous', 'dangerous'], weight: 5 },
+      ],
+      kindWeights: {
+        inn: 11,
+        merchant: 25,
+        dojo: 20,
+        casino: 10,
+        battle: 30,
+        elite: 20,
+      },
+      eventWeights: {
+        yeGu: 15,
+        duFang: 10,
+        chouJia: 12,
+        baoXiang: 15,
+        langZhong: 24,
+        gaoRen: 20,
+      },
+      recentHistorySize: 2,
+      recentWeightMultiplier: 0.25,
+      unaffordableServiceWeightMultiplier: 0.2,
+      innMaxOffersPerDay: 1,
+      innCooldownOffers: 2,
+      lowHpMercy: {
+        eventId: 'yuanShou',
+        hpRatio: 0.3,
+        healMaxHpRatio: 0.15,
+        maxPerRun: 2,
+        maxPerDay: 1,
+      },
+    },
     startMoney: 30,
     speedrunTokensPerSkipped: 1,
     dally: { wavesPerEvent: 0.5, eliteChancePerEvent: 0.03 },
@@ -250,13 +283,13 @@ export const TUNING = {
       healAmount: 25,
       cardPrice: 18, // 郎中傳一招
       trainCost: 30, // 高人指點：練內力/起手張數
-      realmCost: 55, // 高人指點：悟境界上限（較貴）
+      rankCost: 55, // 高人指點：提升自動合成階級上限（較貴）
     },
 
     /**
      * 三輪連線拉霸（速通代幣消化，刻意弱於刷滿）。
      * 每輪各轉一個符號；三連＝該符號大獎、兩連＝小銀兩、全不同＝安慰銀兩。
-     *   金/葫蘆 → 銀兩；劍 → 加一張攻擊牌；毒/火 → 牌組某攻擊牌附魔；囧 → 槓龜。
+     *   金/葫蘆/毒/火 → 銀兩；劍 → 加一張攻擊牌；囧 → 槓龜。
      * 期望值刻意壓低（多數拉出小銀兩），大獎稀有 —— 速通是挑戰而非穩定發財。
      */
     slot: {
@@ -265,8 +298,8 @@ export const TUNING = {
         coin: 35,
         gourd: 90,
         sword: 'card',
-        poison: { status: 'poison', level: 2 }, // 附魔給 level（實際層數出牌時按傷害算）
-        fire: { status: 'burn', level: 2 },
+        poison: 20,
+        fire: 20,
         dud: 0,
       },
       pairCoins: 7,
@@ -275,8 +308,7 @@ export const TUNING = {
     },
 
     /**
-     * 客棧（白天池中的 'inn' 節點）：買招式、歇息回血、刪去一招，也能拉霸。
-     * 買牌 ＝ 牌組變厚變強；刪牌 ＝ 提純；歇息 ＝ 拿銀兩換血量續航。
+     * 白天服務設施共用數值：客棧只歇息、江湖商販賣牌與遺物、武館刪牌、賭坊消耗代幣。
      */
     shop: {
       cardCount: 3,

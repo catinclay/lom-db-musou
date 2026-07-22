@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
-import { BattleState } from '../core/BattleState.js';
-import { RunState } from '../core/RunState.js';
+import { GAME_ACTION, GAME_PHASE, GameSession } from '../core/GameSession.js';
 import { EVENT } from '../core/events.js';
 import { getRelicDef } from '../core/RelicLibrary.js';
 import { DeckOverlay } from '../ui/DeckOverlay.js';
@@ -12,7 +11,10 @@ import { FormationView } from '../ui/FormationView.js';
 import { project } from '../ui/perspective.js';
 import { ensureCardTextures } from '../ui/cardTextures.js';
 import { ensureEnemyTextures, PLAYER_TEX } from '../ui/enemyTextures.js';
-import { realmLabel } from '../ui/format.js';
+import { comboLabel, energyPips, inspirationGauge, rankLabel } from '../ui/format.js';
+import { stopTweensOf, tweenTo } from '../ui/tweens.js';
+import { transitionIn } from '../ui/sceneTransitions.js';
+import { transitionToSessionPhase } from '../ui/sessionNavigation.js';
 import { TUNING } from '../config/tuning.js';
 
 const BATTLEFIELD_Y = 600;
@@ -21,7 +23,7 @@ const HAND_BASE_Y = 790;
 
 /**
  * 一場戰鬥的場景（割草）。牌組、血量、敵潮規模全由 RunState 注入的配置決定：
- *   scene.start('Battle', { run, config })
+ *   GameSession 進入 battle phase 後，由 sessionNavigation 帶同一個 session 進場
  * 打贏 → 回 RunMap 推進日程；打輸（血量歸零）/ 通關 → 回 Base（門派據點）。
  *
  * 戰鬥內部的接線（core↔UI、合成劇本、敵陣演出）沿用原沙盒，不動。
@@ -32,9 +34,14 @@ export class BattleScene extends Phaser.Scene {
   }
 
   create(data) {
-    // 獨立啟動（沒帶 run）時給一個新 run + 一場尾王，方便單場調試。
-    this.run = data?.run ?? new RunState();
-    this.config = data?.config ?? this.run.callBoss().config;
+    // 獨立啟動（沒帶 session）時仍透過 GameSession 開一場尾王，方便單場調試。
+    this.session = data?.session ?? new GameSession({ run: data?.run });
+    if (this.session.phase !== GAME_PHASE.BATTLE) {
+      if (data?.config) this.session.beginBattle(data.config, { source: 'debug' });
+      else this.session.dispatch(GAME_ACTION.CALL_BOSS);
+    }
+    this.run = this.session.run;
+    this.config = this.session.context.config;
     this._concluded = false;
 
     ensureCardTextures(this);
@@ -42,11 +49,9 @@ export class BattleScene extends Phaser.Scene {
     this.drawBackdrop();
     this.drawRankLines();
 
-    this.battle = new BattleState({
-      deckList: this.run.deck,
-      tuning: TUNING,
-      battle: this.config,
-    });
+    this.battle = this.session.battle;
+    this.presentedInspiration = 0;
+
     this.formationView = new FormationView(this);
     this.formationView.attackOrigin = { x: 250, y: 720 }; // 暗器從主角這邊飛出
     this.drawPlayerAndHud();
@@ -58,14 +63,13 @@ export class BattleScene extends Phaser.Scene {
     });
 
     this.animator.onFizzle = () => this.flash('牌庫已空', 0x8d7a5e);
-    this.animator.onDrawMiss = (ev) =>
-      this.flash(`補抽失敗（${Math.round(ev.chance * 100)}%）`, 0x6f5f4a);
+    this.animator.onInspiration = (ev) => this.playInspirationStep(ev);
 
     this.drag = new DragController(this, this.handView, {
       battlefieldY: BATTLEFIELD_Y,
       getCard: (uid) => this.battle.hand.findByUid(uid),
       onPlay: (uid) => this.playCard(uid),
-      onMerge: (draggedUid, targetUid) => this.formlessMerge(draggedUid, targetUid),
+      onPump: (wangxingUid, targetUid) => this.pumpCard(wangxingUid, targetUid),
     });
 
     // 玩家攻擊命中敵人 → 打擊特效、閃光、傷害數字、倒地
@@ -91,9 +95,7 @@ export class BattleScene extends Phaser.Scene {
       this.flash(`＋${r.armor} 甲${r.combo.multiplier > 1 ? `  ×${r.combo.multiplier}` : ''}`, 0x4a8fb8)
     );
     this.battle.bus.on(EVENT.PLAYER_HIT, (r) => this.onPlayerHit(r));
-    this.battle.bus.on(EVENT.CARD_PLAY_REJECTED, (r) =>
-      this.flash(r.reason === 'catalyst' ? '忘形無法單獨出牌' : '內力不足', 0xc4583f)
-    );
+    this.battle.bus.on(EVENT.CARD_PLAY_REJECTED, () => this.flash('內力不足', 0xc4583f));
 
     // 抽牌批次化：連點累積張數，短窗口後一次抽完
     this.pendingDraws = 0;
@@ -101,12 +103,12 @@ export class BattleScene extends Phaser.Scene {
     this.drawTimer = null;
 
     this.panel = new DebugPanel({
-      onSpawn: (defId, opts) => this.runTranscript(this.battle.debugAddCard(defId, opts)),
+      onSpawn: (defId, opts) => this.runTranscript(this.session.debug('addCard', { defId, options: opts }).transcript),
       onDraw: () => this.requestDraw(),
       onEndTurn: () => this.endTurnFlow(),
-      onEnergy: (delta) => this.battle.debugAddEnergy(delta),
+      onEnergy: (delta) => this.session.debug('energy', { delta }),
       onStatus: (id) => {
-        this.battle.debugApplyStatus(id);
+        this.session.debug('status', { id });
         this.formationView.refresh();
       },
       onRestart: () => this.restart(),
@@ -120,14 +122,15 @@ export class BattleScene extends Phaser.Scene {
       this.drawTimer?.remove();
       this.panel.destroy();
     });
-    this.restart();
+    this.resetBattlePresentation(this.session.openingTranscript);
+    transitionIn(this);
   }
 
   update() {
     if (this.battle.hand) {
       this.panel.update(this.battle);
       this.updateHud();
-      this.handView.updateCardHints(this.battle.combo.lastRealm, this.battle.energy);
+      this.handView.updateCardHints(this.battle.combo.realm, this.battle.energy);
       // 演出進行中不讓按結束回合（避免打斷連鎖）
       this.endTurnBtn?.setAlpha(this.animator.playing || this._concluded ? 0.4 : 1);
       const canChallenge = this.battle.awaitingWaveChoice && this.battle.formation.isEmpty && this.battle.hasReinforcements;
@@ -198,7 +201,7 @@ export class BattleScene extends Phaser.Scene {
     this.add.text(HAND_CENTER_X - 680, HAND_BASE_Y + 20, '棄牌堆', label).setDepth(10);
     this.add.text(HAND_CENTER_X + 580, HAND_BASE_Y + 20, '牌庫', label).setDepth(10);
     this.add
-      .text(1584, BATTLEFIELD_Y - 10, '↑ 拉過這條線 ＝ 出招　　拉到別張牌上 ＝ 忘形合成', {
+      .text(1584, BATTLEFIELD_Y - 10, '↑ 拉過這條線 ＝ 出招　　忘形拉到別張牌上 ＝ 階級＋1', {
         fontFamily: 'sans-serif',
         fontSize: '13px',
         color: '#5a4a38',
@@ -223,6 +226,10 @@ export class BattleScene extends Phaser.Scene {
 
     this.energyText = this.add
       .text(barX, barY + 22, '', { fontFamily: 'sans-serif', fontSize: '17px', color: '#9fd0e8', fontStyle: 'bold' })
+      .setOrigin(0, 0)
+      .setDepth(5002);
+    this.inspirationText = this.add
+      .text(barX, barY + 46, '', { fontFamily: 'sans-serif', fontSize: '17px', color: '#d9b45c', fontStyle: 'bold' })
       .setOrigin(0, 0)
       .setDepth(5002);
 
@@ -284,13 +291,16 @@ export class BattleScene extends Phaser.Scene {
 
   updateHud() {
     const b = this.battle;
-    this.energyText.setText(`內力  ${b.energy} / ${b.tuning.energyPerTurn}`);
+    this.energyText.setText(`內力　${energyPips(b.energy, b.tuning.energyUnit)}`);
+    this.inspirationText.setText(
+      `靈感　${inspirationGauge(this.presentedInspiration, b.tuning.inspiration.threshold)}`
+    );
     this.bannerText.setText(this.battleBanner());
 
-    const realm = b.combo.lastRealm;
-    this.realmText.setText(`境界　${realm == null ? '無' : realmLabel(realm)}`);
-    const step = b.combo.step;
-    this.comboText.setText(step > 0 ? `連段 ×${step}` : '連段　—');
+    this.realmText.setText(`境界　${rankLabel(b.combo.realm)}`);
+    const combo = b.combo.combo;
+    const label = comboLabel(combo);
+    this.comboText.setText(label).setVisible(Boolean(label));
   }
 
   updateHp() {
@@ -316,17 +326,86 @@ export class BattleScene extends Phaser.Scene {
     this.tweens.add({ targets: o, fillAlpha: 0.28, duration: 90, yoyo: true, onComplete: () => o.destroy() });
   }
 
-  async restart() {
+  /** 逐點重播靈感；第三顆只等同一次普通點亮，滿格特效改在背景自行播放。 */
+  async playInspirationStep(ev) {
+    const triggered = ev.draws > 0;
+    this.presentedInspiration = triggered ? ev.threshold : ev.after;
+    this.updateHud();
+
+    stopTweensOf(this, this.inspirationText);
+    this.inspirationText.setScale(1).setColor(triggered ? '#fff1a8' : '#d9b45c');
+    const pulseHalf = this.animator.d(TUNING.anim.inspirationStep) / 2;
+    await tweenTo(this, {
+      targets: this.inspirationText,
+      scaleX: TUNING.anim.inspirationPulseScale,
+      scaleY: TUNING.anim.inspirationPulseScale,
+      duration: pulseHalf,
+      yoyo: true,
+      ease: 'Back.easeOut',
+    });
+    this.inspirationText.setScale(1).setColor('#d9b45c');
+
+    if (!triggered) return;
+
+    this.playInspirationTrigger();
+    this.presentedInspiration = ev.after;
+    this.updateHud();
+  }
+
+  /** 滿格提示不回傳給 transcript await；抽牌飛行與下一輪靈感可立刻同時開始。 */
+  playInspirationTrigger() {
+    const burstX = this.inspirationText.x + this.inspirationText.width - 12;
+    const burstY = this.inspirationText.y + this.inspirationText.height / 2;
+    const burst = this.add.circle(burstX, burstY, 10, 0xd9b45c, 0.55).setDepth(5100);
+    const cue = this.add
+      .text(burstX + 18, burstY, '靈感滿溢 · 抽一張', {
+        fontFamily: 'sans-serif',
+        fontSize: '17px',
+        color: '#fff1a8',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(5101);
+    const burstDuration = this.animator.d(TUNING.anim.inspirationBurstDuration);
+    const cueDuration = this.animator.d(TUNING.anim.inspirationCueDuration);
+    Promise.all([
+      tweenTo(this, {
+        targets: burst,
+        scaleX: TUNING.anim.inspirationBurstScale,
+        scaleY: TUNING.anim.inspirationBurstScale,
+        alpha: 0,
+        duration: burstDuration,
+        ease: 'Quad.easeOut',
+      }),
+      tweenTo(this, {
+        targets: cue,
+        y: cue.y - TUNING.anim.inspirationRise,
+        alpha: 0,
+        duration: cueDuration,
+        ease: 'Sine.easeOut',
+      }),
+    ]).then(() => {
+      burst.destroy();
+      cue.destroy();
+    });
+  }
+
+  async resetBattlePresentation(dealTranscript) {
     this.animator.reset();
+    this.presentedInspiration = 0;
     this.drawTimer?.remove();
     this.pendingDraws = 0;
     this.handView.clear();
     this.formationView.clear();
 
-    const dealTranscript = this.battle.start();
     this.formationView.sync(this.battle.formation, { animate: false });
     this.updateHp();
     await this.runTranscript(dealTranscript);
+  }
+
+  async restart() {
+    const action = this.session.debug('restart');
+    if (action.ok) await this.resetBattlePresentation(action.transcript);
   }
 
   requestDraw() {
@@ -342,7 +421,7 @@ export class BattleScene extends Phaser.Scene {
       while (this.pendingDraws > 0) {
         const n = this.pendingDraws;
         this.pendingDraws = 0;
-        await this.runTranscript(this.battle.debugDraw(n));
+        await this.runTranscript(this.session.debug('draw', { count: n }).transcript);
       }
     } finally {
       this.drawPumpRunning = false;
@@ -351,24 +430,29 @@ export class BattleScene extends Phaser.Scene {
 
   async endTurnFlow() {
     if (this._concluded) return;
-    const tick = this.battle.statusTurnEnd();
+    const action = this.session.dispatch(GAME_ACTION.END_TURN);
+    if (!action.ok) return;
+    const tick = action.statusTick;
     if (tick.hits.length) await this.wait(300 + Math.min(tick.hits.length, 8) * 60);
     if (tick.clearReward) {
-      this.flash(`清場！下回合內力 ＋${tick.clearReward.energy}、多抽 ${tick.clearReward.draw} 張`, 0xd9b45c);
+      this.flash(
+        `清場！下回合內力 ＋${energyPips(tick.clearReward.energy, this.battle.tuning.energyUnit)}、多抽 ${tick.clearReward.draw} 張`,
+        0xd9b45c
+      );
     }
 
-    const phase = this.battle.enemyPhase();
+    const phase = action.enemyPhase;
     this.formationView.sync(this.battle.formation);
     this.formationView.playSpecialActions(phase.specials);
     if (phase.defeated) this.flash('主角倒下！', 0xc4583f);
     await this.wait(360);
 
     // 敵人相位可能已判定勝負（清場無補充波 ＝ 勝、血量歸零 ＝ 負）
-    if (this.battle.outcome !== 'ongoing') {
-      this.maybeConclude();
+    if (action.settlement) {
+      this.maybeConclude(action.settlement);
       return;
     }
-    await this.runTranscript(this.battle.endTurn());
+    await this.runTranscript(action.transcript);
   }
 
   wait(ms) {
@@ -379,70 +463,69 @@ export class BattleScene extends Phaser.Scene {
 
   runTranscript(transcript) {
     if (!transcript) return Promise.resolve();
-    return this.animator.play(transcript, this.battle.hand.toArray());
+    return this.animator.play(transcript, this.battle.hand.toArray()).then(() => {
+      this.presentedInspiration = this.battle.inspiration;
+      this.updateHud();
+    });
   }
 
   playCard(uid) {
     if (this._concluded) return;
-    const r = this.battle.playCard(uid);
+    const r = this.session.dispatch(GAME_ACTION.PLAY_CARD, { uid });
     if (!r.ok) return;
 
-    this.animator.resetMomentum();
-    this.handView.destroyCard(uid);
-
-    if (r.result.effect.energy) this.flash(`內力 ＋${r.result.effect.energy}`, 0x5aa06a);
+    if (r.result.effect.energy) {
+      this.flash(`內力 ＋${energyPips(r.result.effect.energy, this.battle.tuning.energyUnit)}`, 0x5aa06a);
+    }
+    if (r.result.forgotForm) this.flash('返璞歸真　境界歸零', 0xd9b45c);
     if (r.result.clearReward) {
-      this.flash(`清場！內力 ＋${r.result.clearReward.energy}、抽 ${r.result.clearReward.draw} 張`, 0xd9b45c);
-    }
-
-    if (r.result.transcript) this.runTranscript(r.result.transcript);
-    else this.handView.relayout(true);
-
-    // 這張牌可能砍光了最後一波敵陣
-    this.maybeConclude();
-  }
-
-  challengeNextWave() {
-    const rows = this.battle.challengeNextWave();
-    if (rows > 0) this.setSideButtonVisible(this.challengeBtn, false);
-  }
-
-  formlessMerge(draggedUid, targetUid) {
-    if (this._concluded) return;
-    const transcript = this.battle.formlessMerge(draggedUid, targetUid);
-    if (!transcript) {
-      this.flash('這兩張不能合成', 0x8d7a5e);
-      return;
-    }
-    this.runTranscript(transcript);
-  }
-
-  /** 戰鬥判定出勝負後：結算回 RunState、轉場（回地圖 / 通關 / 敗北）。只跑一次。 */
-  maybeConclude() {
-    if (this._concluded) return;
-    const outcome = this.battle.outcome;
-    if (outcome === 'ongoing') return;
-    this._concluded = true;
-
-    // 先結算（血量寫回、給獎、可能拿遺物），再依結果安排轉場
-    const res = this.run.finishBattle(this.battle);
-    if (outcome === 'won') this.flash('殲滅！', 0xd9b45c);
-    if (res.relic) {
-      this.time.delayedCall(Math.max(1, 400 / this.handView.speed), () =>
-        this.flash(`獲得遺物：${getRelicDef(res.relic).name}`, 0xb06cc0)
+      this.flash(
+        `清場！內力 ＋${energyPips(r.result.clearReward.energy, this.battle.tuning.energyUnit)}、抽 ${r.result.clearReward.draw} 張`,
+        0xd9b45c
       );
     }
 
-    this.time.delayedCall(Math.max(1, (res.relic ? 1500 : 800) / this.handView.speed), () => {
-      if (res.runOver) {
-        this.scene.start('Base', { run: this.run });
-      } else if (res.dayAdvanced && this.run.slotTokens > 0) {
-        // 入夜打贏尾王、手上有速通代幣 ⇒ 先去拉霸機，拉完再進隔天
-        this.scene.start('Slot', { run: this.run });
-      } else {
-        this.scene.start('RunMap', { run: this.run, lastResult: res });
-      }
-    });
+    this.runTranscript(r.result.transcript);
+
+    // 這張牌可能砍光了最後一波敵陣
+    this.maybeConclude(r.settlement);
+  }
+
+  challengeNextWave() {
+    const action = this.session.dispatch(GAME_ACTION.CHALLENGE_WAVE);
+    const rows = action.rowsAdded ?? 0;
+    if (rows > 0) this.setSideButtonVisible(this.challengeBtn, false);
+  }
+
+  pumpCard(wangxingUid, targetUid) {
+    if (this._concluded) return;
+    const action = this.session.dispatch(GAME_ACTION.PUMP_CARD, { wangxingUid, targetUid });
+    const transcript = action.transcript;
+    if (!transcript) {
+      this.flash('忘形只能施放到具體牌上', 0x8d7a5e);
+      return;
+    }
+    this.flash('階級 ＋1', 0xd9b45c);
+    this.runTranscript(transcript);
+  }
+
+  /** GameSession 已完成戰後結算；這裡只播提示並呈現它決定的下一個 phase。 */
+  maybeConclude(settlement) {
+    if (this._concluded) return;
+    if (!settlement) return;
+    const outcome = settlement.outcome;
+    this._concluded = true;
+
+    if (outcome === 'won') this.flash('殲滅！', 0xd9b45c);
+    if (settlement.relic) {
+      this.time.delayedCall(Math.max(1, 400 / this.handView.speed), () =>
+        this.flash(`獲得遺物：${getRelicDef(settlement.relic).name}`, 0xb06cc0)
+      );
+    }
+
+    this.time.delayedCall(Math.max(1, (settlement.relic ? 1500 : 800) / this.handView.speed), () =>
+      transitionToSessionPhase(this, this.session)
+    );
   }
 
   flash(text, color) {

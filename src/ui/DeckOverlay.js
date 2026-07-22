@@ -59,9 +59,8 @@ export class DeckOverlay {
 
     deck.forEach((spec, i) => {
       const card = createCard(spec.defId, {
-        realm: spec.realm ?? 1,
+        rank: spec.rank ?? 1,
         tags: spec.tags ?? [],
-        enchants: spec.enchants ?? {},
       });
       const s = new CardSprite(this.scene, card);
       s.setScale(scale)

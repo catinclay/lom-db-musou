@@ -18,6 +18,10 @@ describe('起始狀態', () => {
     expect(r.deck).not.toBe(STARTING_DECK);
     expect(r.deck.map((s) => s.defId)).toEqual(STARTING_DECK.map((s) => s.defId));
   });
+
+  it('開局自帶靈犀玉', () => {
+    expect(run().relics).toContain('lingXiYu');
+  });
 });
 
 describe('尾王節奏（殺戮尖塔式）', () => {
@@ -66,12 +70,14 @@ describe('白天：三選一 offer', () => {
     expect(r.pending).not.toBeNull();
   });
 
-  it('inn 選項 → 客棧貨架、計入當天、不設 pending', () => {
+  it('inn 選項 → 只提供客棧歇息、計入當天、不設 pending', () => {
     const r = run();
     r.offer = [{ id: 'o', kind: 'inn', done: false }];
     const res = r.takeOffer(0);
-    expect(res.type).toBe('inn');
-    expect(res.shop.cards.length).toBe(r.tuning.run.shop.cardCount);
+    expect(res).toMatchObject({ type: 'service', service: 'inn' });
+    expect(res.shop.service).toBe('inn');
+    expect(res.shop.rest).toBeTruthy();
+    expect(res.shop.cards).toBeUndefined();
     expect(r.eventsDoneToday).toBe(1);
     expect(r.pending).toBeNull();
   });
@@ -119,33 +125,35 @@ describe('奇遇（EventLibrary）', () => {
     expect(node.done).toBe(true); // 戰後才標記完成
   });
 
-  it('enchantRandomAttackCard：附魔到牌組某攻擊牌', () => {
-    const r = run();
-    const name = r.enchantRandomAttackCard('poison', 1, () => 0);
-    expect(name).toBeTruthy();
-    expect(r.deck.some((s) => s.enchants?.poison)).toBe(true);
+  it('路邊野菇的好結果改為獲得一張牌', () => {
+    const r = new RunState({ rng: () => 0 });
+    const before = r.deck.length;
+    const node = { id: 'm', kind: 'event', eventId: 'yeGu', done: false };
+    const result = r.resolveEventChoice(node, 0);
+    expect(result.text).toContain('悟出一招');
+    expect(r.deck).toHaveLength(before + 1);
   });
 });
 
 describe('主角屬性·成長', () => {
   it('attrs 初始化自 tuning', () => {
     const r = run();
-    expect(r.attrs.maxRealm).toBe(r.tuning.maxRealm);
+    expect(r.attrs.maxRank).toBe(r.tuning.maxRank);
     expect(r.attrs.energyPerTurn).toBe(r.tuning.energyPerTurn);
     expect(r.attrs.startingHandSize).toBe(r.tuning.startingHandSize);
   });
 
   it('battleConfig 帶上 attrs', () => {
     const r = run();
-    r.attrs.maxRealm = 6;
-    expect(r.battleConfig('battle', false).attrs.maxRealm).toBe(6);
+    r.attrs.maxRank = 6;
+    expect(r.battleConfig('battle', false).attrs.maxRank).toBe(6);
   });
 
-  it('無形劍意：境界上限 +1', () => {
+  it('無形劍意：階級上限 +1', () => {
     const r = run();
-    const before = r.attrs.maxRealm;
+    const before = r.attrs.maxRank;
     r.addRelic('wuXing');
-    expect(r.attrs.maxRealm).toBe(before + 1);
+    expect(r.attrs.maxRank).toBe(before + 1);
   });
 
   it('高人指點：花銀兩練屬性', () => {
@@ -155,7 +163,7 @@ describe('主角屬性·成長', () => {
     const e0 = r.attrs.energyPerTurn;
     const res = r.resolveEventChoice(node, 0); // 練內力
     expect(res.text).toBeTruthy();
-    expect(r.attrs.energyPerTurn).toBe(e0 + 1);
+    expect(r.attrs.energyPerTurn).toBe(e0 + r.tuning.energyUnit);
     expect(r.money).toBe(100 - r.tuning.run.event.trainCost);
     expect(node.done).toBe(true);
   });
@@ -245,15 +253,6 @@ describe('牌組編輯（商店/拉霸/事件共用）', () => {
     expect(r.removeDeckCard(999)).toBe(false); // 越界不崩潰
   });
 
-  it('enchantDeckCard 累加附魔到 spec.enchants', () => {
-    const r = run();
-    const i = r.deck.findIndex((s) => s.defId === 'guan');
-    expect(r.enchantDeckCard(i, 'poison', 3)).toBe(true);
-    r.enchantDeckCard(i, 'poison', 2);
-    r.enchantDeckCard(i, 'burn', 1);
-    expect(r.deck[i].enchants).toEqual({ poison: 5, burn: 1 });
-  });
-
   it('spendSlotToken 花得起才扣', () => {
     const r = run();
     r.slotTokens = 2;
@@ -265,7 +264,15 @@ describe('牌組編輯（商店/拉霸/事件共用）', () => {
   });
 });
 
-describe('客棧（商店）', () => {
+describe('白天服務設施', () => {
+  it('商販、客棧、武館、賭坊的資料互不夾帶功能', () => {
+    const r = run();
+    expect(r.generateShop('merchant')).toMatchObject({ service: 'merchant', cards: expect.any(Array) });
+    expect(r.generateShop('inn')).toEqual({ service: 'inn', rest: r.tuning.run.shop.rest });
+    expect(r.generateShop('dojo')).toEqual({ service: 'dojo', removePrice: r.tuning.run.shop.removePrice });
+    expect(r.generateShop('casino')).toEqual({ service: 'casino' });
+  });
+
   it('買招式：付得起就加牌、標記售出、扣銀兩', () => {
     const r = run();
     r.money = 100;
@@ -290,7 +297,7 @@ describe('客棧（商店）', () => {
   it('刪招式：付錢刪牌', () => {
     const r = run();
     r.money = 50;
-    const shop = r.generateShop();
+    const shop = r.generateShop('dojo');
     const n = r.deck.length;
     expect(r.buyRemoveCard(shop, 0)).toBe(true);
     expect(r.deck).toHaveLength(n - 1);
@@ -301,7 +308,7 @@ describe('客棧（商店）', () => {
     const r = run();
     r.money = 50;
     r.hp = 10;
-    const shop = r.generateShop();
+    const shop = r.generateShop('inn');
     expect(r.restAtInn(shop)).toBe(true);
     expect(r.hp).toBe(Math.min(r.maxHp, 10 + shop.rest.heal));
     expect(r.money).toBe(50 - shop.rest.price);
@@ -311,7 +318,7 @@ describe('客棧（商店）', () => {
     const r = run();
     r.money = 50;
     r.hp = r.maxHp;
-    expect(r.restAtInn(r.generateShop())).toBe(false);
+    expect(r.restAtInn(r.generateShop('inn'))).toBe(false);
   });
 });
 
@@ -322,7 +329,7 @@ describe('遺物·秘籍', () => {
     expect(r.addRelic('jinZhong')).toBe(true);
     expect(r.maxHp).toBe(before + 25);
     expect(r.addRelic('jinZhong')).toBe(false); // 重複不再拿
-    expect(r.relics).toEqual(['jinZhong']);
+    expect(r.relics).toEqual(['lingXiYu', 'jinZhong']);
   });
 
   it('grantRandomRelic：給沒有的；全收集了回 null', () => {
@@ -341,11 +348,11 @@ describe('遺物·秘籍', () => {
     expect(r.battleConfig('battle', false).relics).toContain('xuanTie');
   });
 
-  it('客棧賣遺物、買得起就入手', () => {
+  it('江湖商販賣遺物、買得起就入手', () => {
     const r = run();
     r.money = 100;
     const shop = r.generateShop();
-    expect(shop.relic).not.toBeNull(); // 第一天沒收集任何遺物，必有貨
+    expect(shop.relic).not.toBeNull(); // 除了初始靈犀玉，仍有其他遺物可販售
     const id = shop.relic.id;
     expect(r.buyRelic(shop)).toBe(true);
     expect(r.ownsRelic(id)).toBe(true);

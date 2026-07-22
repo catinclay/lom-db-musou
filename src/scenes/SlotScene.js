@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
-import { RunState } from '../core/RunState.js';
-import { spinSlot, applySlotReward, SLOT_SYMBOLS, SLOT_SYMBOL_LABEL } from '../core/slot.js';
+import { GAME_ACTION, GameSession } from '../core/GameSession.js';
+import { SLOT_SYMBOLS, SLOT_SYMBOL_LABEL } from '../core/slot.js';
+import { transitionIn } from '../ui/sceneTransitions.js';
+import { transitionToSessionPhase } from '../ui/sessionNavigation.js';
 
 /**
  * 三輪連線拉霸。花速通代幣拉，三連大獎（金/劍/毒/火/葫/囧）。
- * 進來的來源：每天入夜打贏尾王後（若有代幣）、以及客棧（Phase 2 step 2）。
- * 邏輯全在 core/slot.js；這裡只演轉輪、按鈕、結算顯示。
+ * 進來的來源：每天入夜打贏尾王後（若有代幣）、以及白天遇到賭坊。
+ * 邏輯由 GameSession 同步呼叫 core/slot.js；這裡只重播轉輪與顯示結算。
  */
 const REEL_X = [640, 800, 960];
 const REEL_Y = 380;
@@ -16,8 +18,8 @@ export class SlotScene extends Phaser.Scene {
   }
 
   create(data) {
-    this.run = data?.run ?? new RunState();
-    this.back = data?.back ?? null; // 從客棧來時記得回客棧；否則回地圖
+    this.session = data?.session ?? new GameSession({ run: data?.run });
+    this.run = this.session.run;
     this.spinning = false;
     this.reelTimers = [];
     this.pendingTimers = [];
@@ -55,6 +57,7 @@ export class SlotScene extends Phaser.Scene {
 
     this.events.on('shutdown', () => this.clearTimers());
     this.refresh();
+    transitionIn(this);
   }
 
   refresh() {
@@ -65,7 +68,8 @@ export class SlotScene extends Phaser.Scene {
 
   pull() {
     if (this.spinning) return;
-    if (!this.run.spendSlotToken()) {
+    const action = this.session.dispatch(GAME_ACTION.SPIN_SLOT);
+    if (!action.ok) {
       this.result.setText('沒有代幣了…');
       return;
     }
@@ -73,7 +77,7 @@ export class SlotScene extends Phaser.Scene {
     this.result.setText('轉！');
     this.refresh();
 
-    const { reels, reward } = spinSlot(this.run, this.run.rng);
+    const { reels, reward } = action;
 
     // 每個轉輪先快速亂跳，再依序停在結果符號上
     reels.forEach((sym, i) => {
@@ -96,7 +100,6 @@ export class SlotScene extends Phaser.Scene {
 
     // 最後一輪停好後結算
     const reveal = this.time.delayedCall(600 + 2 * 380 + 250, () => {
-      applySlotReward(this.run, reward);
       this.result.setText(reward.label);
       this.spinning = false;
       this.reelTimers = [];
@@ -108,8 +111,8 @@ export class SlotScene extends Phaser.Scene {
 
   leave() {
     this.clearTimers();
-    if (this.back) this.scene.start(this.back.scene, this.back.data);
-    else this.scene.start('RunMap', { run: this.run });
+    const action = this.session.dispatch(GAME_ACTION.LEAVE_SLOT);
+    if (action.ok) transitionToSessionPhase(this, this.session);
   }
 
   clearTimers() {

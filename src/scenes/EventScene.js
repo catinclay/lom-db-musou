@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
-import { RunState } from '../core/RunState.js';
+import { GAME_ACTION, GAME_PHASE, GameSession } from '../core/GameSession.js';
 import { getEventDef, choiceLabel } from '../core/EventLibrary.js';
+import { transitionIn } from '../ui/sceneTransitions.js';
+import { transitionToSessionPhase } from '../ui/sessionNavigation.js';
 
 /**
  * 奇遇·江湖事件：演一段敘事 ＋ 幾個選項。
- * 由 RunMap 的 'event' 節點進來（`scene.start('Event', { run, node, event })`）。
- * 選項結算走 `RunState.resolveEventChoice`：立即事件 → 顯示結果＋繼續回地圖；
+ * GameSession 進入 event phase 後來到這裡；Scene 只呈現 session.context 的事件。
+ * 選項送進 `GameSession.dispatch`：立即事件 → 顯示結果＋繼續回地圖；
  * 觸發戰鬥 → 直接進 Battle（戰後 finishBattle 標記節點完成）。
  */
 export class EventScene extends Phaser.Scene {
@@ -14,9 +16,10 @@ export class EventScene extends Phaser.Scene {
   }
 
   create(data) {
-    this.run = data?.run ?? new RunState();
-    this.node = data?.node;
-    this.event = data?.event ?? getEventDef(this.node.eventId);
+    this.session = data?.session ?? new GameSession({ run: data?.run });
+    this.run = this.session.run;
+    this.node = this.session.context.node ?? data?.node;
+    this.event = this.session.context.event ?? data?.event ?? getEventDef(this.node.eventId);
     this.dynObjs = [];
 
     this.cameras.main.setBackgroundColor('#141018');
@@ -35,6 +38,7 @@ export class EventScene extends Phaser.Scene {
 
     this.refreshStatus();
     this.renderChoices();
+    transitionIn(this);
   }
 
   refreshStatus() {
@@ -69,12 +73,13 @@ export class EventScene extends Phaser.Scene {
   }
 
   choose(i) {
-    const res = this.run.resolveEventChoice(this.node, i);
-    if (res.battle) {
-      this.scene.start('Battle', { run: this.run, config: res.battle });
+    const action = this.session.dispatch(GAME_ACTION.CHOOSE_EVENT, { index: i });
+    if (!action.ok) return;
+    if (this.session.phase === GAME_PHASE.BATTLE) {
+      transitionToSessionPhase(this, this.session);
       return;
     }
-    this.showResult(res.text ?? '……');
+    this.showResult(action.result?.text ?? '……');
   }
 
   showResult(text) {
@@ -97,6 +102,9 @@ export class EventScene extends Phaser.Scene {
       .setOrigin(0.5);
     rect.on('pointerover', () => rect.setStrokeStyle(4, 0xffe1b0));
     rect.on('pointerout', () => rect.setStrokeStyle(3, 0xd9b45c));
-    rect.on('pointerdown', () => this.scene.start('RunMap', { run: this.run }));
+    rect.on('pointerdown', () => {
+      const action = this.session.dispatch(GAME_ACTION.CONTINUE_EVENT);
+      if (action.ok) transitionToSessionPhase(this, this.session);
+    });
   }
 }

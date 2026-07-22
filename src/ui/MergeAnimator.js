@@ -38,8 +38,8 @@ export class MergeAnimator {
      */
     this.chainStep = 0;
     this.onFizzle = null;
-    this.onDrawMiss = null;
     this.onMerge = null;
+    this.onInspiration = null;
   }
 
   d(ms) {
@@ -120,16 +120,27 @@ export class MergeAnimator {
   /** 播完單一份劇本。中途若被 reset() 接手（世代改變）就立刻收手。 */
   async playOne(transcript, finalCards) {
     const gen = this.generation;
+    const pendingInspirationDraws = [];
+    const flushInspirationDraws = async () => {
+      if (!pendingInspirationDraws.length) return;
+      await Promise.all(pendingInspirationDraws.splice(0));
+    };
 
     for (let i = 0; i < transcript.length; i++) {
       if (gen !== this.generation) return; // 已被 reset() 接手
       const ev = transcript[i];
+      const canOverlapInspiration = ev.type === TX.INSPIRATION
+        || ev.type === TX.MERGE
+        || ((ev.type === TX.DRAW || ev.type === TX.DRAW_FIZZLE) && ev.source === 'inspiration');
+      // 靈感抽牌可與後續點亮及合成並行；合成會直接接管仍在飛行的材料牌 tween。
+      // 只有棄牌／升階等其他節奏邊界才先收束背景抽牌。
+      if (!canOverlapInspiration) await flushInspirationDraws();
 
       switch (ev.type) {
         case TX.DISCARD: {
-          // 回合結束：動能歸零，新回合的抽牌從初速重新起跑
+          // 出牌／忘形升階／回合結束都是玩家節奏的斷點。
           this.resetMomentum();
-          // 整手一起收 —— 把連續的棄牌併成一次並行演出，別一張一張拖
+          // 回合結束的整手棄牌仍併成一次並行演出，別一張一張拖。
           const cards = [ev.card];
           while (i + 1 < transcript.length && transcript[i + 1].type === TX.DISCARD) {
             cards.push(transcript[i + 1].card);
@@ -138,22 +149,31 @@ export class MergeAnimator {
           await this.playDiscard(cards);
           break;
         }
+        case TX.EXHAUST:
+          this.resetMomentum();
+          await this.playExhaust(ev.card);
+          break;
+        case TX.RANK_UP:
+          await this.playRankUp(ev);
+          break;
+        case TX.INSPIRATION:
+          await this.onInspiration?.(ev);
+          break;
         case TX.DRAW:
           // 抽牌也吃動能 —— 一次抽很多張時越抽越快，不再每張都是慢速初速
           this.hand.chainSpeed = this.accelFor(this.chainStep);
           this.chainStep += 1;
-          await this.playDraw(ev);
+          if (ev.source === 'inspiration') pendingInspirationDraws.push(this.playDraw(ev));
+          else await this.playDraw(ev);
           break;
         case TX.MERGE:
           this.hand.chainSpeed = this.accelFor(this.chainStep);
           this.chainStep += 1;
           await this.playMerge(ev);
           break;
-        case TX.DRAW_MISS:
-          await this.playDrawMiss(ev);
-          break;
         case TX.DRAW_FIZZLE:
-          await this.playFizzle();
+          if (ev.source === 'inspiration') pendingInspirationDraws.push(this.playFizzle());
+          else await this.playFizzle();
           break;
         case TX.CHAIN_GUARD_TRIPPED:
           // 正常遊戲永遠不該走到這 —— 走到了就是邏輯有 bug
@@ -166,6 +186,7 @@ export class MergeAnimator {
 
     // 每份劇本播完都對齊一次權威手牌。被 reset() 接手時就別對齊 —— 接手者會自己收尾。
     // 這裡不重置動能：連續的抽牌/合成 batch 要接續加速。
+    await flushInspirationDraws();
     if (gen !== this.generation) return;
     if (finalCards) await this.hand.syncTo(finalCards);
   }
@@ -193,6 +214,60 @@ export class MergeAnimator {
     });
 
     await Promise.all(flights.filter(Boolean));
+  }
+
+  /** 本場消耗：不飛向棄牌堆，而是在手牌位置上浮、縮小並消散。 */
+  async playExhaust(card) {
+    const s = this.hand.getSprite(card.uid);
+    if (!s) return;
+
+    this.hand.removeCard(card.uid);
+    stopTweensOf(this.scene, s);
+
+    await this.tween({
+      targets: s,
+      y: s.y - TUNING.anim.exhaustRise,
+      scaleX: s.scaleX * TUNING.anim.exhaustScale,
+      scaleY: s.scaleY * TUNING.anim.exhaustScale,
+      alpha: 0,
+      duration: this.d(TUNING.anim.exhaustFade),
+      ease: 'Cubic.easeIn',
+    });
+    s.destroy();
+  }
+
+  /** 忘形升階：舊卡換成新 uid，留在原位彈一下，再交回手牌排版。 */
+  async playRankUp(ev) {
+    const old = this.hand.getSprite(ev.consumed);
+    if (!old) return;
+
+    stopTweensOf(this.scene, old);
+    const pose = {
+      x: old.x,
+      y: old.y,
+      rotation: old.rotation,
+      scaleX: old.scaleX,
+      scaleY: old.scaleY,
+      depth: old.depth,
+    };
+    this.hand.destroyCard(ev.consumed);
+
+    const result = this.hand.addCard(ev.result, ev.handIndex);
+    result.setPosition(pose.x, pose.y);
+    result.setRotation(pose.rotation);
+    result.setScale(pose.scaleX, pose.scaleY);
+    result.setAlpha(1);
+    result.setDepth(pose.depth);
+
+    await this.tween({
+      targets: result,
+      scaleX: pose.scaleX * TUNING.anim.rankUpPopScale,
+      scaleY: pose.scaleY * TUNING.anim.rankUpPopScale,
+      duration: this.d(TUNING.anim.mergePop),
+      yoyo: true,
+      ease: 'Quad.easeOut',
+    });
+    await this.hand.relayout(true);
   }
 
   async playDraw(ev) {
@@ -255,12 +330,6 @@ export class MergeAnimator {
     });
 
     await this.hand.relayout(true);
-    await this.delay(TUNING.anim.chainStepGap);
-  }
-
-  /** 補抽的機率骰輸了 —— 要讓玩家看得出「有骰，只是沒中」 */
-  async playDrawMiss(ev) {
-    this.onDrawMiss?.(ev);
     await this.delay(TUNING.anim.chainStepGap);
   }
 

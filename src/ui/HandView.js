@@ -2,6 +2,7 @@ import { CardSprite } from './CardSprite.js';
 import { computeLayout } from './HandLayout.js';
 import { tweenTo, stopTweensOf } from './tweens.js';
 import { TUNING } from '../config/tuning.js';
+import { shouldHighlightCombo } from './format.js';
 
 /**
  * 手牌的視覺層：哪些 sprite 存在、各自該在哪。
@@ -194,21 +195,13 @@ export class HandView {
   }
 
   /**
-   * 更新連段提示：realm 大於目前連段境界（lastRealm）的牌會亮綠邊 ——
-   * 打它能讓連段續下去（境界無時 lastRealm 當 0，任何實體卡都能起手）。
+ * 更新手牌提示：
+   *   內力不足的牌灰掉；已有境界時，打得出且能繼續突破的牌才亮綠邊。
    */
-  /**
-   * 更新手牌提示：
-   *   內力不足（cost > energy）的牌灰掉，且**連段高光也一起收掉**（反正打不出）。
-   *   打得出、且 realm 大於目前連段境界（lastRealm，境界無當 0）的牌亮綠邊 —— 打它能續連段。
-   */
-  updateCardHints(lastRealm, energy) {
-    // 無境界（lastRealm null，回合開始/連段中斷後）不高光 —— 這時任何牌都能起手，
-    // 全部亮綠只是雜訊。只有「連段進行中」才點亮能續段（境界更高）的牌。
-    const inCombo = lastRealm != null;
+  updateCardHints(realm, energy) {
     for (const s of this.sprites.values()) {
       const affordable = s.cost <= energy;
-      const canCombo = affordable && inCombo && s.card.realm != null && s.card.realm > lastRealm;
+      const canCombo = shouldHighlightCombo(s.card, realm, energy, s.cost);
       s.setAffordable(affordable);
       s.setComboHint(canCombo);
     }

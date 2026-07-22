@@ -1,8 +1,8 @@
 import { defaultRng } from './rng.js';
 import { TUNING } from '../config/tuning.js';
 import { RELIC_IDS, getRelicDef } from './RelicLibrary.js';
-import { EVENT_IDS, getEventDef } from './EventLibrary.js';
-import { getCardDef, CARD_TYPE } from './CardLibrary.js';
+import { getEventDef } from './EventLibrary.js';
+import { composeOffer, offerKeyForNode } from './OfferDirector.js';
 
 /**
  * 一局「江湖遠征」的權威狀態。零 Phaser —— 場景讀它、驅動它，戰鬥仍是同一個 BattleState。
@@ -12,10 +12,10 @@ import { getCardDef, CARD_TYPE } from './CardLibrary.js';
  *   BattleState        單場戰鬥；每次由 RunState.battleConfig() 注入配置現生，戰後結果寫回。
  *
  * 一「天」的結構：
- *   白天 = 一輪輪「三選一」（offer）：每輪擲 3 個選項挑 1 個做，做完補下一輪，隨時可入夜。
+ *   白天 = 一個個「時辰」的三選一（offer）：每時辰擲 3 個選項挑 1 個做，做完推進下一時辰，隨時可入夜。
  *   入夜 = callBoss() 召尾王（elite/boss/final，依 dayBossKind）。打贏 → 推進日程。
  *
- * 局內的境界合成照舊每場重置（BattleState 的事），RunState 不碰 —— 變強靠的是牌組/銀兩/遺物。
+ * 局內的階級合成每場重置（BattleState 的事），RunState 不碰。
  */
 
 /** 初始牌組（Phase 1 沿用沙盒那套唐門牌）。之後由據點/商店改動。 */
@@ -49,17 +49,25 @@ export class RunState {
     this.hp = this.maxHp;
     // 主角屬性（跨戰保存、可成長）：戰鬥時覆蓋 tuning 的對應值（見 battleConfig / BattleState）。
     this.attrs = {
-      maxRealm: tuning.maxRealm,
+      maxRank: tuning.maxRank,
       energyPerTurn: tuning.energyPerTurn,
       startingHandSize: tuning.startingHandSize,
     };
     this.money = tuning.run.startMoney;
     this.slotTokens = 0; // 速通拉霸代幣（Phase 2 拉霸表消化）
     this.relics = [];
+    for (const id of tuning.run.startingRelics ?? []) this.addRelic(id);
     this.outcome = 'ongoing'; // 'ongoing' | 'won'（通關）| 'lost'（主角倒下）
     this.day = 0;
     /** 場景開戰前設好，戰後 finishBattle 用它結算。 */
     this.pending = null;
+    // 選項導演的跨時辰記憶：抑制重複、限制客棧與低血救濟出現次數。
+    this.offerHistory = [];
+    this.offerSerial = 0;
+    this.lastInnOfferSerial = -1000000;
+    this.innOffersToday = 0;
+    this.mercyUsed = 0;
+    this.mercyUsedToday = 0;
     // 跨 run 的據點升級：把永久加成疊進這局的起始狀態（血/內力/銀兩/牌組/遺物）。
     if (meta) meta.applyToRun(this);
     this.beginDay();
@@ -69,64 +77,66 @@ export class RunState {
   beginDay() {
     this.day += 1;
     this.eventsDoneToday = 0;
+    this.innOffersToday = 0;
+    this.mercyUsedToday = 0;
     this.offer = null;
   }
 
-  /** 今天還能再做幾樁事件（達上限就只能入夜）。 */
+  /** 今天還剩幾個可行動的時辰（歸零就只能入夜）。 */
   get roundsLeft() {
     return Math.max(0, this.tuning.run.maxRoundsPerDay - this.eventsDoneToday);
   }
 
-  /** 確保有一輪可選的 offer（RunMap 進場呼叫）：沒了就補一輪，達上限則空。 */
+  /** 確保本時辰有可選的 offer（RunMap 進場呼叫）：沒了就補一組，達上限則空。 */
   ensureOffer() {
     if (!this.offer) this.rollOffer();
     return this.offer;
   }
 
-  /** 生成一輪「三選一」的選項（達當天上限則空陣列）。 */
+  /** 生成本時辰「三選一」：由 OfferDirector 保證節奏與選項多樣性。 */
   rollOffer() {
     if (this.roundsLeft <= 0) {
       this.offer = [];
       return this.offer;
     }
-    this.offer = Array.from({ length: this.tuning.run.offer.size }, (_, s) => this.rollNode(s));
+    this.offer = composeOffer(this);
     return this.offer;
   }
 
-  /** 擲一個選項節點（隨機類別，event 再抽一個 eventId）。 */
-  rollNode(slot) {
-    const o = this.tuning.run.offer;
-    const x = this.rng();
-    let kind;
-    if (x < o.innChance) kind = 'inn';
-    else if (x < o.innChance + o.eventChance) kind = 'event';
-    else if (this.rng() < this.tuning.run.eliteInPoolChance) kind = 'elite';
-    else kind = 'battle';
-    const node = { id: `d${this.day}r${this.eventsDoneToday}s${slot}`, kind, done: false };
-    if (kind === 'event') node.eventId = EVENT_IDS[Math.floor(this.rng() * EVENT_IDS.length)];
-    return node;
+  canOfferInn() {
+    const config = this.tuning.run.offer;
+    return this.hp < this.maxHp
+      && this.money >= this.tuning.run.shop.rest.price
+      && this.innOffersToday < config.innMaxOffersPerDay
+      && this.offerSerial - this.lastInnOfferSerial > config.innCooldownOffers;
+  }
+
+  noteInnOffered() {
+    this.innOffersToday += 1;
+    this.lastInnOfferSerial = this.offerSerial;
   }
 
   /**
-   * 從本輪 offer 選第 index 個去做。選了就把整輪消化掉（其餘作廢），下次進 RunMap 補新一輪。
+   * 從本時辰 offer 選第 index 個去做。選了就把這組選項消化掉（其餘作廢），下次進 RunMap 進下一時辰。
    *   event → { type:'event', event, node }（完成在 resolveEventChoice 才定）
-   *   inn   → 進客棧、計入當天，回 { type:'inn', shop }
+   *   service → 客棧／商販／武館／賭坊，進場即計入當天
    *   battle/elite → 設 pending（done/count 交給戰後 finishBattle），回 { type:'battle', kind, config }
    * @returns 結果，或 null（index 無效）
    */
   takeOffer(index) {
     const node = this.offer?.[index];
     if (!node) return null;
-    this.offer = null; // 這一輪消化掉，其餘選項作廢
+    this.offerHistory.push(offerKeyForNode(node));
+    this.offer = null; // 本時辰的選項已消化，其餘選項作廢
 
     if (node.kind === 'event') {
       return { type: 'event', event: getEventDef(node.eventId), node };
     }
-    if (node.kind === 'inn') {
+    if (['inn', 'merchant', 'dojo', 'casino'].includes(node.kind)) {
       node.done = true;
       this.eventsDoneToday += 1;
-      node.shop = this.generateShop();
-      return { type: 'inn', shop: node.shop };
+      node.shop = this.generateShop(node.kind);
+      return { type: 'service', service: node.kind, shop: node.shop };
     }
     this.pending = { node, kind: node.kind, isBoss: false };
     return { type: 'battle', kind: node.kind, config: this.battleConfig(node.kind, false) };
@@ -148,15 +158,6 @@ export class RunState {
       this.eventsDoneToday += 1;
     }
     return result;
-  }
-
-  /** 隨機挑牌組裡一張攻擊牌，附上 level 級的某狀態。@returns 那張牌的名字，或 null（沒攻擊牌） */
-  enchantRandomAttackCard(statusId, level, rng = this.rng) {
-    const idxs = this.deck.map((s, i) => i).filter((i) => getCardDef(this.deck[i].defId).type === CARD_TYPE.ATTACK);
-    if (!idxs.length) return null;
-    const i = idxs[Math.floor(rng() * idxs.length)];
-    this.enchantDeckCard(i, statusId, level);
-    return getCardDef(this.deck[i].defId).name;
   }
 
   /** 今天尾王的類別：最終日 → final；每 bossEveryDays 天 → boss（魔王）；其餘 → elite（小王）。 */
@@ -271,8 +272,6 @@ export class RunState {
   }
 
   // ── 牌組編輯（商店/拉霸/事件共用）──────────────────────
-  // deck 是 spec 陣列；spec.enchants 由 BattleState.start 的 createCard 種進戰鬥實例，
-  // 所以「附魔到牌組某張牌」＝改該 spec 的 enchants，就會在之後每場戰鬥生效。
 
   /** 加一張牌進牌組。@returns 新 spec */
   addDeckCard(defId, extra = {}) {
@@ -288,16 +287,6 @@ export class RunState {
     return true;
   }
 
-  /** 把某狀態附魔的 level 疊到牌組第 index 張（累加 level；實際層數出牌時按傷害算）。@returns 是否成功 */
-  enchantDeckCard(index, statusId, level = 1) {
-    const spec = this.deck[index];
-    if (!spec) return false;
-    const cur = spec.enchants ? { ...spec.enchants } : {};
-    cur[statusId] = (cur[statusId] ?? 0) + level;
-    spec.enchants = cur;
-    return true;
-  }
-
   /** 花一枚速通拉霸代幣。@returns 是否花得起 */
   spendSlotToken() {
     if (this.slotTokens <= 0) return false;
@@ -305,11 +294,15 @@ export class RunState {
     return true;
   }
 
-  // ── 客棧（商店）──────────────────────────────────────
+  // ── 白天服務設施──────────────────────────────────────
 
-  /** 生成一間客棧的貨架：cardCount 張待售招式（各帶價）＋ 刪牌/歇息服務 ＋（有的話）一件遺物。 */
-  generateShop() {
+  /** 依設施生成服務內容；各設施只帶自己能做的功能。 */
+  generateShop(service = 'merchant') {
     const s = this.tuning.run.shop;
+    if (service === 'inn') return { service, rest: { ...s.rest } };
+    if (service === 'dojo') return { service, removePrice: s.removePrice };
+    if (service === 'casino') return { service };
+
     const pool = [...s.cardPool];
     const cards = [];
     for (let i = 0; i < s.cardCount && pool.length; i++) {
@@ -321,9 +314,8 @@ export class RunState {
     const relic = relicPool.length
       ? { id: relicPool[Math.floor(this.rng() * relicPool.length)], price: s.relicPrice, sold: false }
       : null;
-    return { cards, relic, removePrice: s.removePrice, rest: { ...s.rest } };
+    return { service: 'merchant', cards, relic };
   }
-
   /** 買下貨架上的遺物。@returns 是否成交 */
   buyRelic(shop) {
     const offer = shop?.relic;

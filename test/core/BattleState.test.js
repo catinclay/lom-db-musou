@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { BattleState } from '../../src/core/BattleState.js';
-import { resetUidCounter, TAG } from '../../src/core/Card.js';
+import { resetUidCounter } from '../../src/core/Card.js';
 import { seededRng } from '../../src/core/rng.js';
 import { TUNING } from '../../src/config/tuning.js';
 import { TX } from '../../src/core/transcript.js';
@@ -8,14 +8,12 @@ import { EVENT } from '../../src/core/events.js';
 
 const deckOf = (specs) => specs.map((s) => (typeof s === 'string' ? { defId: s } : s));
 
-/** 預設關掉補抽機率，讓戰鬥流程的測試不受骰子干擾 */
 const battle = (deckList, overrides = {}) =>
   new BattleState({
     deckList,
     rng: seededRng(42),
     tuning: {
       ...TUNING,
-      mergeDraw: { baseChance: 0, decayPerMerge: 0, minChance: 0 },
       ...overrides,
     },
   });
@@ -35,7 +33,7 @@ describe('戰鬥啟動', () => {
     const b = battle(deckOf(['pi', 'pi', 'pi', 'pi']), { startingHandSize: 4 });
     b.start();
     expect(b.hand.size).toBe(1);
-    expect(b.hand.get(0).realm).toBe(3); // 四張境界1 → 兩張境界2 → 一張境界3
+    expect(b.hand.get(0).rank).toBe(3); // 四張階級1 → 兩張階級2 → 一張階級3
   });
 
   it('牌組不足時不崩潰', () => {
@@ -60,10 +58,10 @@ describe('★ 合成僅存在於當場戰鬥', () => {
     const b = battle(deckList, { startingHandSize: 4 });
 
     b.start();
-    expect(b.hand.get(0).realm).toBe(3);
+    expect(b.hand.get(0).rank).toBe(3);
 
     b.start();
-    expect(b.hand.get(0).realm).toBe(3); // 又從 4 張境界1 重新合成，而非從境界3 起跳
+    expect(b.hand.get(0).rank).toBe(3); // 又從 4 張階級1 重新合成，而非從階級3 起跳
     expect(b.hand.size).toBe(1);
   });
 
@@ -92,8 +90,8 @@ describe('出牌', () => {
   it('消耗內力', () => {
     const b = battle(deckOf(['hengPi', 'anqi']), { startingHandSize: 2, energyPerTurn: 3 });
     b.start();
-    b.playCard(b.hand.get(0).uid); // 橫劈/暗器皆 1 費
-    expect(b.energy).toBe(2);
+    b.playCard(b.hand.get(0).uid); // 橫劈/暗器皆消耗一整格（三小格）
+    expect(b.energy).toBe(0);
   });
 
   it('內力不足時拒絕出牌', () => {
@@ -107,35 +105,72 @@ describe('出牌', () => {
     const b = battle(deckOf(['hengPi', 'anqi']), { startingHandSize: 2 });
     b.start();
     const card = b.hand.get(0);
-    b.playCard(card.uid);
+    const r = b.playCard(card.uid);
     expect(b.hand.findByUid(card.uid)).toBeUndefined();
     expect(b.deck.discardCount).toBe(1);
+    expect(r.result.transcript[0]).toMatchObject({ type: TX.DISCARD, card });
   });
 
-  it('傷害走 resolveEffect（境界 × 連段）', () => {
-    const b = battle(deckOf([{ defId: 'hengPi', realm: 3 }]), {
+  it('傷害走 resolveEffect（階級每發 × 連擊次數）', () => {
+    const b = battle(deckOf([{ defId: 'hengPi', rank: 3 }]), {
       startingHandSize: 1,
       energyPerTurn: 9,
     });
     b.start();
-    expect(b.playCard(b.hand.get(0).uid).result.damage).toBe(18); // 橫劈境界3：round(7 × 2.5)
+    expect(b.playCard(b.hand.get(0).uid).result.damage).toBe(18); // 橫劈階級3：round(7 × 2.5)
   });
 
   it('連段倍率確實套用到傷害', () => {
-    const b = battle(deckOf([{ defId: 'hengPi', realm: 1 }, { defId: 'hengPi', realm: 2 }]), {
+    const b = battle(deckOf([{ defId: 'hengPi', rank: 1 }, { defId: 'hengPi', rank: 2 }]), {
       startingHandSize: 2,
       energyPerTurn: 9,
     });
     b.start();
-    const r1 = b.hand.toArray().find((c) => c.realm === 1);
-    const r2 = b.hand.toArray().find((c) => c.realm === 2);
+    const r1 = b.hand.toArray().find((c) => c.rank === 1);
+    const r2 = b.hand.toArray().find((c) => c.rank === 2);
 
     expect(b.playCard(r1.uid).result.damage).toBe(7 * 1 * 1); // 境界1 ×1
     expect(b.playCard(r2.uid).result.damage).toBe(22); // 境界2 round(7×1.5)=11、連段×2
   });
 
+  it('中斷牌不吃既有連擊加成，結算後境界與連擊皆歸零', () => {
+    const b = battle(deckOf([
+      { defId: 'hengPi', rank: 1 },
+      { defId: 'guan', rank: 2 },
+      { defId: 'anqi', rank: 1 },
+    ]), { startingHandSize: 3, energyPerTurn: 9 });
+    b.start();
+    const first = b.hand.toArray().find((c) => c.defId === 'hengPi');
+    const second = b.hand.toArray().find((c) => c.defId === 'guan');
+    b.playCard(first.uid);
+    b.playCard(second.uid);
+
+    const interruptedCard = b.hand.get(0);
+    const r = b.playCard(interruptedCard.uid).result;
+    expect(r.combo).toMatchObject({ realm: 0, combo: 0, multiplier: 1, interrupted: true });
+    expect(r.damage).toBe(15);
+    expect(b.combo.current()).toMatchObject({ realm: 0, combo: 0, multiplier: 0 });
+  });
+
+  it('功能牌中斷時只套用基礎效果，不會沿用舊連擊或減少效果', () => {
+    const b = battle(deckOf([
+      { defId: 'hengPi', rank: 1 },
+      { defId: 'guan', rank: 2 },
+      { defId: 'yunQi', rank: 1 },
+    ]), { startingHandSize: 3, energyPerTurn: 9 });
+    b.start();
+    b.playCard(b.hand.toArray().find((c) => c.defId === 'hengPi').uid);
+    b.playCard(b.hand.toArray().find((c) => c.defId === 'guan').uid);
+    const before = b.energy;
+    const r = b.playCard(b.hand.toArray().find((c) => c.defId === 'yunQi').uid).result;
+
+    expect(r.combo).toMatchObject({ combo: 0, multiplier: 1, interrupted: true });
+    expect(r.effect.energy).toBe(3);
+    expect(b.energy).toBe(before + 3);
+  });
+
   it('★ 暗器的連段加的是發數不是傷害', () => {
-    const b = battle(deckOf([{ defId: 'hengPi', realm: 1 }, { defId: 'anqi', realm: 2 }]), {
+    const b = battle(deckOf([{ defId: 'hengPi', rank: 1 }, { defId: 'anqi', rank: 2 }]), {
       startingHandSize: 2,
       energyPerTurn: 9,
     });
@@ -207,19 +242,20 @@ describe('回合', () => {
     b.endTurn();
 
     expect(b.energy).toBe(3);
-    expect(b.combo.step).toBe(0);
-    expect(b.combo.lastRealm).toBeNull();
+    expect(b.combo.combo).toBe(0);
+    expect(b.combo.realm).toBe(0);
   });
 
-  it('★ 補抽機率的計數每回合重置', () => {
-    const b = battle(deckOf(['pi', 'pi', 'dang', 'dang', 'ci', 'ci', 'buFa', 'buFa']), {
-      startingHandSize: 4,
+  it('合成次數每回合重置，靈感則跨回合保留', () => {
+    const b = battle(deckOf(['pi', 'ci', 'dang', 'buFa']), {
+      startingHandSize: 2,
     });
     b.start();
-    expect(b.mergesThisTurn).toBeGreaterThan(0);
+    b.mergesThisTurn = 4;
+    b.inspiration = 1;
     b.endTurn();
-    // 新回合起手若又合成，計數是從 0 重新算的
-    expect(b.mergesThisTurn).toBeLessThanOrEqual(2);
+    expect(b.mergesThisTurn).toBe(0);
+    expect(b.inspiration).toBe(1);
   });
 
   it('回合數遞增', () => {
@@ -231,9 +267,9 @@ describe('回合', () => {
   });
 });
 
-describe('忘形合成（透過 BattleState）', () => {
-  it('拖曳合成生效並發事件', () => {
-    const b = battle(deckOf([{ defId: 'pi', tags: [TAG.FORMLESS] }, { defId: 'dang' }]), {
+describe('忘形施放（透過 BattleState）', () => {
+  it('拖到具體牌升階、忘形本場消耗並發事件', () => {
+    const b = battle(deckOf(['wangXing', 'dang']), {
       startingHandSize: 2,
     });
 
@@ -241,13 +277,16 @@ describe('忘形合成（透過 BattleState）', () => {
     b.bus.on(EVENT.TRANSCRIPT, (t) => (emitted = t));
     b.start();
 
-    const pi = b.hand.toArray().find((c) => c.defId === 'pi');
+    const wangXing = b.hand.toArray().find((c) => c.defId === 'wangXing');
     const dang = b.hand.toArray().find((c) => c.defId === 'dang');
-    b.formlessMerge(pi.uid, dang.uid);
+    b.pumpCard(wangXing.uid, dang.uid);
 
     expect(b.hand.size).toBe(1);
     expect(b.hand.get(0).defId).toBe('dang');
-    expect(b.hand.get(0).realm).toBe(2);
+    expect(b.hand.get(0).rank).toBe(2);
+    expect(b.exhaustPile).toContain(wangXing);
+    expect(b.deck.discardPile).not.toContain(wangXing);
+    expect(emitted[0]).toMatchObject({ type: TX.EXHAUST, card: wangXing });
     expect(emitted).not.toBeNull();
   });
 
@@ -255,24 +294,50 @@ describe('忘形合成（透過 BattleState）', () => {
     const b = battle(deckOf(['pi', 'dang']), { startingHandSize: 2 });
     b.start();
     const [a, c] = b.hand.toArray();
-    expect(b.formlessMerge(a.uid, c.uid)).toBeNull();
+    expect(b.pumpCard(a.uid, c.uid)).toBeNull();
     expect(b.hand.size).toBe(2);
   });
 });
 
+describe('忘形打出', () => {
+  it('境界歸零、連擊保留，忘形本場消耗且低階牌可續擊', () => {
+    const b = battle([], { startingHandSize: 0, energyPerTurn: 9 });
+    b.start();
+    b.debugAddCard('hengPi', { rank: 1 });
+    b.playCard(b.hand.get(0).uid);
+    b.debugAddCard('guan', { rank: 2 });
+    b.playCard(b.hand.get(0).uid);
+    expect(b.combo.current()).toMatchObject({ realm: 2, combo: 2 });
+
+    b.debugAddCard('wangXing');
+    const wangXing = b.hand.get(0);
+    const forgotten = b.playCard(wangXing.uid);
+    expect(forgotten.result).toMatchObject({ exhausted: true, forgotForm: true });
+    expect(forgotten.result.transcript[0]).toMatchObject({ type: TX.EXHAUST, card: wangXing });
+    expect(b.combo.current()).toMatchObject({ realm: 0, combo: 2 });
+    expect(b.exhaustPile).toContain(wangXing);
+    expect(b.deck.discardPile).not.toContain(wangXing);
+
+    b.debugAddCard('anqi', { rank: 1 });
+    const resumed = b.playCard(b.hand.get(0).uid);
+    expect(resumed.result.combo).toMatchObject({ realm: 1, combo: 3, multiplier: 3, broke: true });
+    expect(resumed.result.effect.hits).toBe(9);
+  });
+});
+
 describe('功能牌（技能）', () => {
-  it('運氣調息：不耗內力、內力 +境界', () => {
-    const b = battle(deckOf([{ defId: 'yunQi', realm: 2 }]), {
+  it('運氣調息：不耗內力，二階每次施放回復 4 小格', () => {
+    const b = battle(deckOf([{ defId: 'yunQi', rank: 2 }]), {
       startingHandSize: 1,
       energyPerTurn: 3,
     });
     b.start();
     const r = b.playCard(b.hand.get(0).uid);
     expect(r.ok).toBe(true);
-    expect(b.energy).toBe(5); // 3 − 0（費）+ 2（境界二）
+    expect(b.energy).toBe(7); // 3 − 0（費）+ 4（二階）
   });
 
-  it('臨機應變：耗一內力、抽（境界+1）張，並回傳抽牌 transcript', () => {
+  it('臨機應變：耗一整格內力、獲得靈感，滿 3 點抽一張', () => {
     const b = battle(deckOf(['pi', 'ci', 'dang', 'buFa']), {
       startingHandSize: 0, // 起手空手，牌庫留 4 張給抽
       energyPerTurn: 3,
@@ -282,9 +347,10 @@ describe('功能牌（技能）', () => {
     const linJi = b.hand.toArray().find((c) => c.defId === 'linJi');
     const r = b.playCard(linJi.uid);
 
-    expect(b.energy).toBe(2); // 3 − 1
-    expect(r.result.transcript.filter((e) => e.type === TX.DRAW)).toHaveLength(2); // 境界一抽 2
-    expect(b.hand.size).toBe(2); // 打掉臨機應變、抽 2 張（皆不同名，不合成）
+    expect(b.energy).toBe(0); // 3 − 3
+    expect(r.result.effect.inspiration).toBe(3);
+    expect(r.result.transcript.filter((e) => e.type === TX.DRAW)).toHaveLength(1);
+    expect(b.hand.size).toBe(1);
   });
 });
 
@@ -329,16 +395,16 @@ describe('debug 工具', () => {
     b.start();
     b.debugAddCard('pi');
     expect(b.hand.size).toBe(1);
-    expect(b.hand.get(0).realm).toBe(2);
+    expect(b.hand.get(0).rank).toBe(2);
   });
 
-  it('debugAddCard 可指定境界與忘形', () => {
+  it('debugAddCard 可指定階級與 tags', () => {
     const b = battle(deckOf(['dang']), { startingHandSize: 1 });
     b.start();
-    b.debugAddCard('anqi', { realm: 5, tags: [TAG.FORMLESS] });
+    b.debugAddCard('anqi', { rank: 5, tags: ['debug'] });
     const anqi = b.hand.toArray().find((c) => c.defId === 'anqi');
-    expect(anqi.realm).toBe(5);
-    expect(anqi.tags).toContain(TAG.FORMLESS);
+    expect(anqi.rank).toBe(5);
+    expect(anqi.tags).toContain('debug');
   });
 
   it('debugDraw 抽牌並解算連鎖', () => {
@@ -346,7 +412,7 @@ describe('debug 工具', () => {
     b.start();
     b.debugDraw(1);
     expect(b.hand.size).toBe(1);
-    expect(b.hand.get(0).realm).toBe(2);
+    expect(b.hand.get(0).rank).toBe(2);
   });
 });
 
@@ -396,14 +462,14 @@ describe('有限戰鬥（勝負判定）', () => {
     expect(b.wavesLeft).toBe(Infinity);
   });
 
-  it('清場獎勵只領一次：內力 +1、抽一張，並等待玩家選擇', () => {
+  it('清場獎勵只領一次：內力 +1 格、抽一張，並等待玩家選擇', () => {
     const b = withBattle({ waves: 2, rows: 3, minPerRow: 1, maxPerRow: 1 });
     b.start();
     for (const e of b.formation.living) e.alive = false;
     const energy = b.energy;
     const reward = b.rewardClearIfNeeded();
-    expect(reward).toMatchObject({ energy: 1, draw: 1 });
-    expect(b.energy).toBe(energy + 1);
+    expect(reward).toMatchObject({ energy: TUNING.energyUnit, draw: 1 });
+    expect(b.energy).toBe(energy + TUNING.energyUnit);
     expect(b.awaitingWaveChoice).toBe(true);
     expect(b.rewardClearIfNeeded()).toBeNull();
   });
@@ -438,21 +504,22 @@ describe('有限戰鬥（勝負判定）', () => {
     const b = new BattleState({
       deckList: deckOf(Array(20).fill('hengPi')),
       rng: seededRng(1),
-      tuning: { ...TUNING, mergeDraw: { baseChance: 0, decayPerMerge: 0, minChance: 0 } },
+      tuning: TUNING,
       battle: { waves: 2, rows: 3, minPerRow: 1, maxPerRow: 1 },
     });
     b.start();
     for (const e of b.formation.living) e.alive = false;
 
     const tick = b.statusTurnEnd();
-    expect(tick.clearReward).toMatchObject({ energy: 1, draw: 1, deferred: true });
+    expect(tick.clearReward).toMatchObject({ energy: TUNING.energyUnit, draw: 1, deferred: true });
     expect(b.awaitingWaveChoice).toBe(false);
 
     b.enemyPhase();
     expect(b.formation.occupiedRankCount()).toBe(1);
     const transcript = b.endTurn();
-    expect(b.energy).toBe(TUNING.energyPerTurn + 1);
-    expect(transcript.filter((step) => step.type === TX.DRAW)).toHaveLength(TUNING.startingHandSize + 1);
+    expect(b.energy).toBe(TUNING.energyPerTurn + TUNING.energyUnit);
+    expect(transcript.filter((step) => step.type === TX.DRAW && step.source !== 'inspiration'))
+      .toHaveLength(TUNING.startingHandSize + 1);
   });
 
   it('場地無法生成新排時不會空扣補充波內容', () => {
@@ -479,10 +546,20 @@ describe('遺物·秘籍（BattleState 掛鉤）', () => {
   const withRelics = (relics, deck = ['hengPi']) =>
     new BattleState({ deckList: deckOf(deck), rng: seededRng(1), tuning: TUNING, battle: { relics } });
 
-  it('玄鐵令：每回合內力 +1', () => {
+  it('靈犀玉：戰鬥開始獲得 2 點靈感', () => {
+    const b = withRelics(['lingXiYu'], ['hengPi', 'anqi']);
+    const tx = b.start();
+    expect(b.inspiration).toBe(2);
+    expect(tx.slice(0, 2)).toEqual([
+      expect.objectContaining({ type: TX.INSPIRATION, source: 'relic', amount: 1, after: 1 }),
+      expect.objectContaining({ type: TX.INSPIRATION, source: 'relic', amount: 1, after: 2 }),
+    ]);
+  });
+
+  it('玄鐵令：每回合內力 +1 格', () => {
     const b = withRelics(['xuanTie']);
     b.start();
-    expect(b.energy).toBe(TUNING.energyPerTurn + 1);
+    expect(b.energy).toBe(TUNING.energyPerTurn + TUNING.energyUnit);
   });
 
   it('百寶囊：起手多抽一張', () => {
@@ -523,11 +600,10 @@ describe('主角屬性（attrs 覆蓋 tuning）', () => {
     expect(b.hand.size).toBe(7);
   });
 
-  it('境界上限：流進合成上限（maxRealm 2 → 併到境界二就停）', () => {
-    const noDraw = { ...TUNING, mergeDraw: { baseChance: 0, decayPerMerge: 0, minChance: 0 } };
-    const b = new BattleState({ deckList: deckOf(['pi', 'pi', 'pi', 'pi']), rng: seededRng(42), tuning: noDraw, battle: { attrs: { maxRealm: 2 } } });
+  it('階級上限：流進合成上限（maxRank 2 → 併到階級二就停）', () => {
+    const b = new BattleState({ deckList: deckOf(['pi', 'pi', 'pi', 'pi']), rng: seededRng(42), tuning: TUNING, battle: { attrs: { maxRank: 2 } } });
     b.start();
     expect(b.hand.size).toBe(2); // 四張境界一 → 兩張境界二（到頂不再併）
-    expect(b.hand.toArray().every((c) => c.realm === 2)).toBe(true);
+    expect(b.hand.toArray().every((c) => c.rank === 2)).toBe(true);
   });
 });
